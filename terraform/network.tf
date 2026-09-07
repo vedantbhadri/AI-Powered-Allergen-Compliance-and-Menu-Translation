@@ -12,4 +12,15 @@ data "aws_subnets" "default" {
     name   = "vpc-id"
     values = [data.aws_vpc.default.id]
   }
+
+  # Use two known-good AZs rather than every default subnet. Some regions
+  # expose an AZ in the default VPC where the selected EC2 instance type is
+  # unavailable, which causes Elastic Beanstalk environment creation to fail.
+  filter {
+    name = "availability-zone"
+    values = [
+      "${var.aws_region}a",
+      "${var.aws_region}b",
+    ]
+  }
 }

@@ -162,6 +162,8 @@ input[type="text"]:focus, textarea:focus {
 .btn.primary { background: var(--teal-deep); color: #fff; }
 .btn.primary:hover { background: #17473f; }
 .btn.small { padding: 6px 12px; font-size: 12px; margin-top: 0; }
+.btn.danger { border-color: #a33a2b; color: #a33a2b; }
+.btn.danger:hover { background: #fbe9e6; }
 
 .status-line { font-size: 12.5px; margin-top: 10px; color: var(--teal-deep); min-height: 16px; font-weight: 500; }
 .progress-list { font-size: 12.5px; margin-top: 10px; color: var(--muted); }
@@ -209,6 +211,7 @@ input[type="text"]:focus, textarea:focus {
 .preview-sub { margin: 2px 0 0; }
 .filters { display: flex; gap: 14px; font-size: 13px; color: var(--ink); }
 .filters label { display: flex; align-items: center; gap: 5px; cursor: pointer; }
+.preview-actions { display: flex; gap: 8px; }
 
 .dish-grid {
   display: grid;

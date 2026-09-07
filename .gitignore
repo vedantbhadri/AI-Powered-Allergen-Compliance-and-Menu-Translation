@@ -9,6 +9,7 @@ terraform/terraform.tfstate
 terraform/terraform.tfstate.backup
 terraform/terraform.tfvars
 terraform/build/
+terraform/*.tfplan
 
 /tmp/allergen_local_db.json
 /tmp/allergen_uploads/

@@ -19,10 +19,18 @@ from __future__ import annotations
 import json
 import logging
 import os
+from concurrent.futures import ThreadPoolExecutor
 
 from flask import Flask, jsonify, request, send_from_directory
 
-from services import allergen_rules, bedrock_service, dynamo_service, s3_service, textract_service
+from services import (
+    allergen_rules,
+    bedrock_service,
+    dynamo_service,
+    menu_parser,
+    s3_service,
+    textract_service,
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -62,7 +70,13 @@ def languages():
 
 
 # ---------------------------------------------------------------- core pipeline
-def _run_pipeline(menu_id: str, name: str, description: str, source: str) -> dict:
+def _run_pipeline(
+    menu_id: str,
+    name: str,
+    description: str,
+    source: str,
+    persist: bool = True,
+) -> dict:
     """Shared two-step chain: (1) allergen analyze+verify (2) translate."""
     llm_result = bedrock_service.extract_allergens(name, description)
     rule_categories = allergen_rules.scan_text_for_allergens(f"{name} {description}")
@@ -90,12 +104,18 @@ def _run_pipeline(menu_id: str, name: str, description: str, source: str) -> dic
         "diet_tags": allergen_rules.derive_diet_tags(confirmed, f"{name} {description}"),
         "translations": translations,
     }
-    return dynamo_service.put_item(item)
+    return dynamo_service.put_item(item) if persist else item
 
 
 @application.route("/api/menus")
 def get_menus():
     return jsonify({"menus": dynamo_service.list_menus()})
+
+
+@application.route("/api/menus/<menu_id>", methods=["DELETE"])
+def delete_menu(menu_id):
+    deleted_count = dynamo_service.delete_menu(menu_id)
+    return jsonify({"menu_id": menu_id, "deleted_count": deleted_count})
 
 
 @application.route("/api/menus/<menu_id>/items", methods=["GET"])
@@ -149,20 +169,8 @@ def delete_item(menu_id, item_id):
 
 # ---------------------------------------------------------------- upload / OCR
 def _split_ocr_lines_into_dishes(lines: list[str]) -> list[dict]:
-    """Very simple heuristic: treat each non-empty line as a dish name and
-    the following line as its description, alternating. Real menu layouts
-    vary a lot - this is a starting point matching the mock-up's
-    "name + description" card format and is designed to be improved
-    with the human-in-the-loop editor rather than perfected here."""
-    cleaned = [l.strip() for l in lines if l.strip()]
-    dishes = []
-    i = 0
-    while i < len(cleaned):
-        name = cleaned[i]
-        description = cleaned[i + 1] if i + 1 < len(cleaned) else ""
-        dishes.append({"name": name, "description": description})
-        i += 2
-    return dishes
+    """Convert Textract lines into dish cards using menu-aware heuristics."""
+    return menu_parser.parse_ocr_lines(lines)
 
 
 @application.route("/api/menus/<menu_id>/upload", methods=["POST"])
@@ -175,14 +183,36 @@ def upload_menu(menu_id):
 
     stored_path = s3_service.upload_raw_file(file_bytes, file.filename, content_type)
     lines = textract_service.extract_text_from_bytes(file_bytes, content_type)
+    if not lines:
+        return jsonify({
+            "error": "No text could be extracted from this file. Try a clearer, "
+                     "upright JPG or PNG with readable menu text.",
+            "stored_path": stored_path,
+        }), 422
     dishes = _split_ocr_lines_into_dishes(lines)
+    if not dishes:
+        return jsonify({
+            "error": "Text was detected, but no menu dishes could be identified.",
+            "ocr_lines": lines,
+            "stored_path": stored_path,
+        }), 422
 
-    created = []
-    for dish in dishes:
-        if not dish["name"]:
-            continue
-        item = _run_pipeline(menu_id, dish["name"], dish["description"], source="upload")
-        created.append(item)
+    valid_dishes = [dish for dish in dishes if dish["name"]]
+    worker_count = min(int(os.environ.get("PIPELINE_WORKERS", "4")), len(valid_dishes))
+    with ThreadPoolExecutor(max_workers=max(worker_count, 1)) as executor:
+        analyzed = executor.map(
+            lambda dish: _run_pipeline(
+                menu_id,
+                dish["name"],
+                dish["description"],
+                source="upload",
+                persist=False,
+            ),
+            valid_dishes,
+        )
+        # Keep persistence sequential: boto3 resources are not guaranteed to
+        # be thread-safe, and map preserves the visual order from the menu.
+        created = [dynamo_service.put_item(item) for item in analyzed]
 
     return jsonify({"stored_path": stored_path, "ocr_lines": lines, "items": created}), 201
 

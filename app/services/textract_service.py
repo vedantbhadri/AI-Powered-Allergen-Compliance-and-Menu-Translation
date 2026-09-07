@@ -51,4 +51,4 @@ def extract_text_from_bytes(file_bytes: bytes, content_type: str) -> List[str]:
         return lines
     except (BotoCoreError, ClientError) as exc:
         logger.warning("Textract OCR failed: %s", exc)
-        return [f"[OCR error: {exc}]"]
+        return []

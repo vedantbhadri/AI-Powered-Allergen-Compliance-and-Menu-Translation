@@ -12,3 +12,9 @@ terraform/build/
 
 /tmp/allergen_local_db.json
 /tmp/allergen_uploads/
+
+
+build/layer/
+build/**/.hypothesis/
+build/**/.pytest_cache/
+build/**/__pycache__/

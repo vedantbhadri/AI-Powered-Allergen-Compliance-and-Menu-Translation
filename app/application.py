@@ -19,18 +19,104 @@ from __future__ import annotations
 import json
 import logging
 import os
+import sys
+
+# --- make the new Lambda code reachable from this old Flask app -----------
+# "sys.path.insert" just tells Python "also look in these folders" when
+# something does `import X` or `from X import Y`.
+sys.path.insert(0, "../build/layer/python")  # so `from services import ...` resolves
+sys.path.insert(0, "../build/read_menu")
+sys.path.insert(0, "../build/edit_menu")
+
+# Both readMenu and editMenu were generated into files that are literally
+# both named "handler.py". Python can only remember ONE thing called
+# "handler" at a time, so a plain `import handler` twice would secretly
+# give you the same file both times. importlib lets us load each file by
+# its exact path instead, so they stay two separate, correct modules.
+import importlib.util
+
+def _load_module(name, path):
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+read_menu_handler = _load_module("read_menu_handler", "../build/read_menu/handler.py")
+edit_menu_handler = _load_module("edit_menu_handler", "../build/edit_menu/handler.py")
 
 from flask import Flask, jsonify, request, send_from_directory
 
 from services import allergen_rules, bedrock_service, dynamo_service, s3_service, textract_service
 
+# --- fake AWS for local testing --------------------------------------------
+# "moto" pretends to be real AWS. Once mock_aws() is started, ANY boto3
+# call anywhere in this whole program (DynamoDB, S3, Bedrock, etc.) gets
+# quietly redirected to an in-memory fake instead of the real internet.
+# This is what lets you test without an AWS account or spending anything.
+from moto import mock_aws
+
+# All fake AWS resources must agree on the same region, or DynamoDB will
+# say "resource not found" even though the table genuinely exists - it
+# will just be sitting in the "wrong" pretend region.
+os.environ.setdefault("AWS_REGION", "us-east-1")
+os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")
+os.environ["MENU_TABLE_NAME"] = "allergen-menu-items"
+
+_mock = mock_aws()
+_mock.start()
+
+import boto3
+_ddb = boto3.resource("dynamodb", region_name="us-east-1")
+
+# Create the fake DynamoDB table itself - same key design as the real one:
+# menu_id (which restaurant/menu) + item_id (which dish inside it).
+_ddb.create_table(
+    TableName="allergen-menu-items",
+    KeySchema=[
+        {"AttributeName": "menu_id", "KeyType": "HASH"},   # partition key
+        {"AttributeName": "item_id", "KeyType": "RANGE"},  # sort key
+    ],
+    AttributeDefinitions=[
+        {"AttributeName": "menu_id", "AttributeType": "S"},
+        {"AttributeName": "item_id", "AttributeType": "S"},
+    ],
+    BillingMode="PAY_PER_REQUEST",
+)
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
+
+# Where the 8 real sample dishes (Peanut Satay, Seafood Chowder, etc.) live.
+# This MUST be defined before anything tries to open this file - that
+# ordering mistake was the bug we fixed earlier.
 SAMPLE_DATA_PATH = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "sample_data", "sample_menu.json"
 )
+
+# --- seed the fake table with the real sample menu -------------------------
+# Reads the same sample_menu.json the old "Load Sample Menu" button uses,
+# and puts each dish into the fake table under "kiwi-cafe-queenstown" -
+# the exact menu_id the frontend (app.js) already expects.
+# Allergens/translations are left empty here since this just loads the raw
+# menu; the AI pipeline (Leo's/Banu's work) is what would normally fill
+# those in.
+with open(SAMPLE_DATA_PATH, "r") as f:
+    _sample = json.load(f)
+
+_menu_table = _ddb.Table("allergen-menu-items")
+for i, dish in enumerate(_sample["items"]):
+    _menu_table.put_item(Item={
+        "menu_id": "kiwi-cafe-queenstown",
+        "item_id": f"dish-{i:04d}",
+        "name": dish["name"],
+        "description": dish["description"],
+        "status": "ready",
+        "allergens": {"confirmed": [], "display_tags": []},
+        "diet_tags": [],
+        "translations": {},
+    })
 
 application = Flask(__name__, static_folder=STATIC_DIR, static_url_path="")
 app = application  # alias - some tooling/tests look for `app`
@@ -61,7 +147,71 @@ def languages():
     return jsonify({"languages": bedrock_service.LANGUAGES})
 
 
-# ---------------------------------------------------------------- core pipeline
+# ---------------------------------------------------------------- NEW: readMenu / editMenu bridge
+# These routes are the bridge to Suresh's new Lambda-style functions.
+# They don't contain any real logic themselves - they just build a fake
+# "API Gateway event" dictionary (the same shape real API Gateway would
+# send), hand it to the real handler function, and pass the response back.
+
+@application.route("/api/v2/menus/<restaurant_id>")
+def v2_get_menu(restaurant_id):
+    event = {
+        "routeKey": "GET /menus/{restaurantId}",
+        "pathParameters": {"restaurantId": restaurant_id},
+    }
+    result = read_menu_handler.handler(event)
+    return result["body"], result["statusCode"], {"Content-Type": "application/json"}
+
+
+@application.route("/api/v2/menus/<upload_id>/status")
+def v2_get_status(upload_id):
+    event = {
+        "routeKey": "GET /menus/{uploadId}/status",
+        "pathParameters": {"uploadId": upload_id},
+    }
+    result = read_menu_handler.handler(event)
+    return result["body"], result["statusCode"], {"Content-Type": "application/json"}
+
+
+@application.route("/api/v2/restaurants")
+def v2_list_restaurants():
+    event = {
+        "routeKey": "GET /restaurants",
+        "pathParameters": {},
+    }
+    result = read_menu_handler.handler(event)
+    return result["body"], result["statusCode"], {"Content-Type": "application/json"}
+
+
+# for the login
+# ROUGH LOCAL APPROXIMATION ONLY - NOT REAL AUTH. Real auth is Cognito's JWT
+# authorizer in terraform/apigateway.tf, enforced entirely inside API Gateway.
+LOCAL_FAKE_ADMIN_TOKEN = "local-fake-admin-token"
+
+@application.route("/api/v2/auth/login", methods=["POST"])
+def v2_fake_login():
+    body = request.get_json(force=True) or {}
+    if body.get("username") == "admin" and body.get("password") == "localtest123":
+        return jsonify({"token": LOCAL_FAKE_ADMIN_TOKEN})
+    return jsonify({"error": "invalid credentials"}), 401
+
+
+@application.route("/api/v2/menus/<menu_id>/items/<item_id>", methods=["PATCH"])
+def v2_edit_item(menu_id, item_id):
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header != f"Bearer {LOCAL_FAKE_ADMIN_TOKEN}":
+        return jsonify({"error": "unauthorized - login as admin first"}), 401
+
+    event = {
+        "pathParameters": {"menuId": menu_id, "itemId": item_id},
+        "body": request.get_data(as_text=True),
+        "isBase64Encoded": False,
+    }
+    result = edit_menu_handler.handler(event)
+    return result["body"], result["statusCode"], {"Content-Type": "application/json"}
+
+
+# ---------------------------------------------------------------- OLD core pipeline (Bedrock + rules)
 def _run_pipeline(menu_id: str, name: str, description: str, source: str) -> dict:
     """Shared two-step chain: (1) allergen analyze+verify (2) translate."""
     llm_result = bedrock_service.extract_allergens(name, description)
@@ -93,6 +243,7 @@ def _run_pipeline(menu_id: str, name: str, description: str, source: str) -> dic
     return dynamo_service.put_item(item)
 
 
+# ---------------------------------------------------------------- OLD menu routes
 @application.route("/api/menus")
 def get_menus():
     return jsonify({"menus": dynamo_service.list_menus()})
@@ -187,7 +338,12 @@ def upload_menu(menu_id):
     return jsonify({"stored_path": stored_path, "ocr_lines": lines, "items": created}), 201
 
 
-# ---------------------------------------------------------------- sample data
+# ---------------------------------------------------------------- sample data (OLD button)
+# NOTE: this button calls the REAL Bedrock API (bedrock_service.extract_allergens
+# inside _run_pipeline). Since moto is mocking ALL of boto3 right now, and moto
+# doesn't yet support Bedrock's "converse" operation, clicking this button will
+# fail with NotImplementedError. That's expected for now - it's unrelated to
+# readMenu/editMenu and not something you need working today.
 @application.route("/api/menus/<menu_id>/seed", methods=["POST"])
 def seed_sample_menu(menu_id):
     """Loads sample_data/sample_menu.json and runs every dish through the

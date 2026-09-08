@@ -1,0 +1,440 @@
+{
+  "pbtResults": {},
+  "executionHistory": {
+    "2.1 Handler scaffold, routeKey dispatch, and path-param validation": [
+      {
+        "executionId": "71232528-63c6-4881-842f-a8b4d966941c",
+        "chatSessionId": "sess_cab203fd-6273-488b-91b5-8f81104cd111",
+        "timestamp": 1788414463397
+      },
+      {
+        "executionId": "71232528-63c6-4881-842f-a8b4d966941c",
+        "chatSessionId": "sess_cab203fd-6273-488b-91b5-8f81104cd111",
+        "timestamp": 1788414623993
+      },
+      {
+        "executionId": "ea07c016-2476-4d21-b924-2d3ae8c776b1",
+        "chatSessionId": "sess_cab203fd-6273-488b-91b5-8f81104cd111",
+        "timestamp": 1788605209321
+      }
+    ],
+    "2.2 Implement `GET /menus/{restaurantId}` list path": [
+      {
+        "executionId": "71232528-63c6-4881-842f-a8b4d966941c",
+        "chatSessionId": "sess_cab203fd-6273-488b-91b5-8f81104cd111",
+        "timestamp": 1788414463528
+      },
+      {
+        "executionId": "ea07c016-2476-4d21-b924-2d3ae8c776b1",
+        "chatSessionId": "sess_cab203fd-6273-488b-91b5-8f81104cd111",
+        "timestamp": 1788605260973
+      },
+      {
+        "executionId": "ea07c016-2476-4d21-b924-2d3ae8c776b1",
+        "chatSessionId": "sess_cab203fd-6273-488b-91b5-8f81104cd111",
+        "timestamp": 1788606752762
+      }
+    ],
+    "2.3 Implement `GET /menus/{uploadId}/status` path": [
+      {
+        "executionId": "71232528-63c6-4881-842f-a8b4d966941c",
+        "chatSessionId": "sess_cab203fd-6273-488b-91b5-8f81104cd111",
+        "timestamp": 1788414463657
+      },
+      {
+        "executionId": "ea07c016-2476-4d21-b924-2d3ae8c776b1",
+        "chatSessionId": "sess_cab203fd-6273-488b-91b5-8f81104cd111",
+        "timestamp": 1788605262660
+      },
+      {
+        "executionId": "ea07c016-2476-4d21-b924-2d3ae8c776b1",
+        "chatSessionId": "sess_cab203fd-6273-488b-91b5-8f81104cd111",
+        "timestamp": 1788606753914
+      }
+    ],
+    "3.1 Handler scaffold, body parsing, and validation": [
+      {
+        "executionId": "71232528-63c6-4881-842f-a8b4d966941c",
+        "chatSessionId": "sess_cab203fd-6273-488b-91b5-8f81104cd111",
+        "timestamp": 1788414463747
+      },
+      {
+        "executionId": "71232528-63c6-4881-842f-a8b4d966941c",
+        "chatSessionId": "sess_cab203fd-6273-488b-91b5-8f81104cd111",
+        "timestamp": 1788414625065
+      },
+      {
+        "executionId": "ea07c016-2476-4d21-b924-2d3ae8c776b1",
+        "chatSessionId": "sess_cab203fd-6273-488b-91b5-8f81104cd111",
+        "timestamp": 1788435836079
+      }
+    ],
+    "3.2 Implement allergen filtering and tag recomputation": [
+      {
+        "executionId": "71232528-63c6-4881-842f-a8b4d966941c",
+        "chatSessionId": "sess_cab203fd-6273-488b-91b5-8f81104cd111",
+        "timestamp": 1788414463912
+      },
+      {
+        "executionId": "ea07c016-2476-4d21-b924-2d3ae8c776b1",
+        "chatSessionId": "sess_cab203fd-6273-488b-91b5-8f81104cd111",
+        "timestamp": 1788605263522
+      },
+      {
+        "executionId": "ea07c016-2476-4d21-b924-2d3ae8c776b1",
+        "chatSessionId": "sess_cab203fd-6273-488b-91b5-8f81104cd111",
+        "timestamp": 1788606754855
+      }
+    ],
+    "3.3 Implement native conditional UpdateItem persistence": [
+      {
+        "executionId": "71232528-63c6-4881-842f-a8b4d966941c",
+        "chatSessionId": "sess_cab203fd-6273-488b-91b5-8f81104cd111",
+        "timestamp": 1788414463998
+      },
+      {
+        "executionId": "ea07c016-2476-4d21-b924-2d3ae8c776b1",
+        "chatSessionId": "sess_cab203fd-6273-488b-91b5-8f81104cd111",
+        "timestamp": 1788606764022
+      },
+      {
+        "executionId": "ea07c016-2476-4d21-b924-2d3ae8c776b1",
+        "chatSessionId": "sess_cab203fd-6273-488b-91b5-8f81104cd111",
+        "timestamp": 1788608932479
+      }
+    ],
+    "4. Checkpoint - handlers importable and layer built": [
+      {
+        "executionId": "71232528-63c6-4881-842f-a8b4d966941c",
+        "chatSessionId": "sess_cab203fd-6273-488b-91b5-8f81104cd111",
+        "timestamp": 1788414464078
+      },
+      {
+        "executionId": "ea07c016-2476-4d21-b924-2d3ae8c776b1",
+        "chatSessionId": "sess_cab203fd-6273-488b-91b5-8f81104cd111",
+        "timestamp": 1788692861742
+      }
+    ],
+    "8. Checkpoint - all handler and test work green": [
+      {
+        "executionId": "71232528-63c6-4881-842f-a8b4d966941c",
+        "chatSessionId": "sess_cab203fd-6273-488b-91b5-8f81104cd111",
+        "timestamp": 1788414464180
+      },
+      {
+        "executionId": "ea07c016-2476-4d21-b924-2d3ae8c776b1",
+        "chatSessionId": "sess_cab203fd-6273-488b-91b5-8f81104cd111",
+        "timestamp": 1788692863397
+      }
+    ],
+    "9.1 Define the shared Lambda layer and both Lambda functions": [
+      {
+        "executionId": "71232528-63c6-4881-842f-a8b4d966941c",
+        "chatSessionId": "sess_cab203fd-6273-488b-91b5-8f81104cd111",
+        "timestamp": 1788414464270
+      },
+      {
+        "executionId": "ea07c016-2476-4d21-b924-2d3ae8c776b1",
+        "chatSessionId": "sess_cab203fd-6273-488b-91b5-8f81104cd111",
+        "timestamp": 1788692864196
+      },
+      {
+        "executionId": "932c92b2-cd6d-4702-8b28-d305b5a87ed4",
+        "chatSessionId": "sess_cab203fd-6273-488b-91b5-8f81104cd111",
+        "timestamp": 1788695002880
+      }
+    ],
+    "9.2 Define the two scoped IAM execution roles": [
+      {
+        "executionId": "71232528-63c6-4881-842f-a8b4d966941c",
+        "chatSessionId": "sess_cab203fd-6273-488b-91b5-8f81104cd111",
+        "timestamp": 1788414464390
+      },
+      {
+        "executionId": "932c92b2-cd6d-4702-8b28-d305b5a87ed4",
+        "chatSessionId": "sess_cab203fd-6273-488b-91b5-8f81104cd111",
+        "timestamp": 1788695009336
+      },
+      {
+        "executionId": "932c92b2-cd6d-4702-8b28-d305b5a87ed4",
+        "chatSessionId": "sess_cab203fd-6273-488b-91b5-8f81104cd111",
+        "timestamp": 1788695122127
+      }
+    ],
+    "9.3 Define API Gateway HTTP API v2 routes, integrations, and permissions": [
+      {
+        "executionId": "71232528-63c6-4881-842f-a8b4d966941c",
+        "chatSessionId": "sess_cab203fd-6273-488b-91b5-8f81104cd111",
+        "timestamp": 1788414464497
+      },
+      {
+        "executionId": "932c92b2-cd6d-4702-8b28-d305b5a87ed4",
+        "chatSessionId": "sess_cab203fd-6273-488b-91b5-8f81104cd111",
+        "timestamp": 1788695010307
+      },
+      {
+        "executionId": "932c92b2-cd6d-4702-8b28-d305b5a87ed4",
+        "chatSessionId": "sess_cab203fd-6273-488b-91b5-8f81104cd111",
+        "timestamp": 1788695120787
+      }
+    ],
+    "10. Final checkpoint - ensure everything is wired and tests pass": [
+      {
+        "executionId": "71232528-63c6-4881-842f-a8b4d966941c",
+        "chatSessionId": "sess_cab203fd-6273-488b-91b5-8f81104cd111",
+        "timestamp": 1788414464577
+      },
+      {
+        "executionId": "932c92b2-cd6d-4702-8b28-d305b5a87ed4",
+        "chatSessionId": "sess_cab203fd-6273-488b-91b5-8f81104cd111",
+        "timestamp": 1788695862527
+      }
+    ],
+    "1. Package the shared Lambda Layer (verbatim service modules)": [
+      {
+        "executionId": "71232528-63c6-4881-842f-a8b4d966941c",
+        "chatSessionId": "sess_cab203fd-6273-488b-91b5-8f81104cd111",
+        "timestamp": 1788414480608
+      },
+      {
+        "executionId": "71232528-63c6-4881-842f-a8b4d966941c",
+        "chatSessionId": "sess_cab203fd-6273-488b-91b5-8f81104cd111",
+        "timestamp": 1788414618571
+      }
+    ],
+    "1.1 Write layer packaging smoke test": [
+      {
+        "executionId": "ea07c016-2476-4d21-b924-2d3ae8c776b1",
+        "chatSessionId": "sess_cab203fd-6273-488b-91b5-8f81104cd111",
+        "timestamp": 1788605250462
+      },
+      {
+        "executionId": "ea07c016-2476-4d21-b924-2d3ae8c776b1",
+        "chatSessionId": "sess_cab203fd-6273-488b-91b5-8f81104cd111",
+        "timestamp": 1788606756248
+      }
+    ],
+    "2. Implement the readMenu handler (`build/read_menu/handler.py`)": [
+      {
+        "executionId": "ea07c016-2476-4d21-b924-2d3ae8c776b1",
+        "chatSessionId": "sess_cab203fd-6273-488b-91b5-8f81104cd111",
+        "timestamp": 1788606754012
+      }
+    ],
+    "3. Implement the editMenu handler (`build/edit_menu/handler.py`)": [
+      {
+        "executionId": "ea07c016-2476-4d21-b924-2d3ae8c776b1",
+        "chatSessionId": "sess_cab203fd-6273-488b-91b5-8f81104cd111",
+        "timestamp": 1788608932584
+      }
+    ],
+    "5.1 Property 1 — read returns stored dishes, sentinel excluded, one query": [
+      {
+        "executionId": "ea07c016-2476-4d21-b924-2d3ae8c776b1",
+        "chatSessionId": "sess_cab203fd-6273-488b-91b5-8f81104cd111",
+        "timestamp": 1788609150893
+      },
+      {
+        "executionId": "ea07c016-2476-4d21-b924-2d3ae8c776b1",
+        "chatSessionId": "sess_cab203fd-6273-488b-91b5-8f81104cd111",
+        "timestamp": 1788689091214
+      }
+    ],
+    "5.2 Property 2 — missing translation codes reported exactly, none fabricated": [
+      {
+        "executionId": "ea07c016-2476-4d21-b924-2d3ae8c776b1",
+        "chatSessionId": "sess_cab203fd-6273-488b-91b5-8f81104cd111",
+        "timestamp": 1788609152261
+      },
+      {
+        "executionId": "ea07c016-2476-4d21-b924-2d3ae8c776b1",
+        "chatSessionId": "sess_cab203fd-6273-488b-91b5-8f81104cd111",
+        "timestamp": 1788613771247
+      }
+    ],
+    "5.3 Property 3 — readMenu never mutates stored data": [
+      {
+        "executionId": "ea07c016-2476-4d21-b924-2d3ae8c776b1",
+        "chatSessionId": "sess_cab203fd-6273-488b-91b5-8f81104cd111",
+        "timestamp": 1788609153752
+      },
+      {
+        "executionId": "ea07c016-2476-4d21-b924-2d3ae8c776b1",
+        "chatSessionId": "sess_cab203fd-6273-488b-91b5-8f81104cd111",
+        "timestamp": 1788613772336
+      }
+    ],
+    "5.4 Property 4 — status endpoint faithfully returns the stored status": [
+      {
+        "executionId": "ea07c016-2476-4d21-b924-2d3ae8c776b1",
+        "chatSessionId": "sess_cab203fd-6273-488b-91b5-8f81104cd111",
+        "timestamp": 1788609154630
+      },
+      {
+        "executionId": "ea07c016-2476-4d21-b924-2d3ae8c776b1",
+        "chatSessionId": "sess_cab203fd-6273-488b-91b5-8f81104cd111",
+        "timestamp": 1788613773787
+      }
+    ],
+    "5.5 Property 5 — status requests validate uploadId before any retrieval": [
+      {
+        "executionId": "ea07c016-2476-4d21-b924-2d3ae8c776b1",
+        "chatSessionId": "sess_cab203fd-6273-488b-91b5-8f81104cd111",
+        "timestamp": 1788609155936
+      },
+      {
+        "executionId": "ea07c016-2476-4d21-b924-2d3ae8c776b1",
+        "chatSessionId": "sess_cab203fd-6273-488b-91b5-8f81104cd111",
+        "timestamp": 1788613775345
+      }
+    ],
+    "5. Property-based tests for readMenu (Hypothesis, DynamoDB mocked, min 100 iterations)": [
+      {
+        "executionId": "ea07c016-2476-4d21-b924-2d3ae8c776b1",
+        "chatSessionId": "sess_cab203fd-6273-488b-91b5-8f81104cd111",
+        "timestamp": 1788613771365
+      }
+    ],
+    "6.1 Property 6 — correction retains only PEAL categories": [
+      {
+        "executionId": "ea07c016-2476-4d21-b924-2d3ae8c776b1",
+        "chatSessionId": "sess_cab203fd-6273-488b-91b5-8f81104cd111",
+        "timestamp": 1788689097661
+      },
+      {
+        "executionId": "ea07c016-2476-4d21-b924-2d3ae8c776b1",
+        "chatSessionId": "sess_cab203fd-6273-488b-91b5-8f81104cd111",
+        "timestamp": 1788689901227
+      }
+    ],
+    "6.2 Property 7 — derived tags equal the real allergen_rules outputs": [
+      {
+        "executionId": "ea07c016-2476-4d21-b924-2d3ae8c776b1",
+        "chatSessionId": "sess_cab203fd-6273-488b-91b5-8f81104cd111",
+        "timestamp": 1788689099954
+      },
+      {
+        "executionId": "ea07c016-2476-4d21-b924-2d3ae8c776b1",
+        "chatSessionId": "sess_cab203fd-6273-488b-91b5-8f81104cd111",
+        "timestamp": 1788689901896
+      }
+    ],
+    "6.3 Property 8 — translation merge preserves untouched codes": [
+      {
+        "executionId": "ea07c016-2476-4d21-b924-2d3ae8c776b1",
+        "chatSessionId": "sess_cab203fd-6273-488b-91b5-8f81104cd111",
+        "timestamp": 1788689100569
+      },
+      {
+        "executionId": "ea07c016-2476-4d21-b924-2d3ae8c776b1",
+        "chatSessionId": "sess_cab203fd-6273-488b-91b5-8f81104cd111",
+        "timestamp": 1788689903320
+      }
+    ],
+    "6.4 Property 9 — name and description accepted iff within length bounds": [
+      {
+        "executionId": "ea07c016-2476-4d21-b924-2d3ae8c776b1",
+        "chatSessionId": "sess_cab203fd-6273-488b-91b5-8f81104cd111",
+        "timestamp": 1788689101850
+      },
+      {
+        "executionId": "ea07c016-2476-4d21-b924-2d3ae8c776b1",
+        "chatSessionId": "sess_cab203fd-6273-488b-91b5-8f81104cd111",
+        "timestamp": 1788689904847
+      }
+    ],
+    "6.5 Property 10 — unsupported language codes rejected without mutation": [
+      {
+        "executionId": "ea07c016-2476-4d21-b924-2d3ae8c776b1",
+        "chatSessionId": "sess_cab203fd-6273-488b-91b5-8f81104cd111",
+        "timestamp": 1788689103041
+      },
+      {
+        "executionId": "ea07c016-2476-4d21-b924-2d3ae8c776b1",
+        "chatSessionId": "sess_cab203fd-6273-488b-91b5-8f81104cd111",
+        "timestamp": 1788689905893
+      }
+    ],
+    "6. Property-based tests for editMenu (Hypothesis, DynamoDB mocked, min 100 iterations)": [
+      {
+        "executionId": "ea07c016-2476-4d21-b924-2d3ae8c776b1",
+        "chatSessionId": "sess_cab203fd-6273-488b-91b5-8f81104cd111",
+        "timestamp": 1788689901332
+      }
+    ],
+    "6.6 Property 11 — successful correction sets status to human_verified": [
+      {
+        "executionId": "ea07c016-2476-4d21-b924-2d3ae8c776b1",
+        "chatSessionId": "sess_cab203fd-6273-488b-91b5-8f81104cd111",
+        "timestamp": 1788689911529
+      },
+      {
+        "executionId": "ea07c016-2476-4d21-b924-2d3ae8c776b1",
+        "chatSessionId": "sess_cab203fd-6273-488b-91b5-8f81104cd111",
+        "timestamp": 1788692203654
+      }
+    ],
+    "6.7 Property 12 — persistence is a single conditional UpdateItem, never put_item": [
+      {
+        "executionId": "ea07c016-2476-4d21-b924-2d3ae8c776b1",
+        "chatSessionId": "sess_cab203fd-6273-488b-91b5-8f81104cd111",
+        "timestamp": 1788689912978
+      },
+      {
+        "executionId": "ea07c016-2476-4d21-b924-2d3ae8c776b1",
+        "chatSessionId": "sess_cab203fd-6273-488b-91b5-8f81104cd111",
+        "timestamp": 1788692204678
+      }
+    ],
+    "6.8 Property 13 — correction on an absent dish fails closed with no change": [
+      {
+        "executionId": "ea07c016-2476-4d21-b924-2d3ae8c776b1",
+        "chatSessionId": "sess_cab203fd-6273-488b-91b5-8f81104cd111",
+        "timestamp": 1788689914425
+      },
+      {
+        "executionId": "ea07c016-2476-4d21-b924-2d3ae8c776b1",
+        "chatSessionId": "sess_cab203fd-6273-488b-91b5-8f81104cd111",
+        "timestamp": 1788692202050
+      }
+    ],
+    "7.1 Example / edge-case unit tests": [
+      {
+        "executionId": "ea07c016-2476-4d21-b924-2d3ae8c776b1",
+        "chatSessionId": "sess_cab203fd-6273-488b-91b5-8f81104cd111",
+        "timestamp": 1788689915780
+      },
+      {
+        "executionId": "ea07c016-2476-4d21-b924-2d3ae8c776b1",
+        "chatSessionId": "sess_cab203fd-6273-488b-91b5-8f81104cd111",
+        "timestamp": 1788692199747
+      }
+    ],
+    "7.2 API Gateway v2 event-shape integration tests": [
+      {
+        "executionId": "ea07c016-2476-4d21-b924-2d3ae8c776b1",
+        "chatSessionId": "sess_cab203fd-6273-488b-91b5-8f81104cd111",
+        "timestamp": 1788689916936
+      },
+      {
+        "executionId": "ea07c016-2476-4d21-b924-2d3ae8c776b1",
+        "chatSessionId": "sess_cab203fd-6273-488b-91b5-8f81104cd111",
+        "timestamp": 1788692200680
+      }
+    ],
+    "7. Example / edge-case and integration tests": [
+      {
+        "executionId": "ea07c016-2476-4d21-b924-2d3ae8c776b1",
+        "chatSessionId": "sess_cab203fd-6273-488b-91b5-8f81104cd111",
+        "timestamp": 1788692199841
+      }
+    ],
+    "9. Terraform: shared Lambda layer and the two functions": [
+      {
+        "executionId": "932c92b2-cd6d-4702-8b28-d305b5a87ed4",
+        "chatSessionId": "sess_cab203fd-6273-488b-91b5-8f81104cd111",
+        "timestamp": 1788695122206
+      }
+    ]
+  }
+}

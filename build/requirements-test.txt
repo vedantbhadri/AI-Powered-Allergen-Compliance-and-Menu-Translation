@@ -1,0 +1,10 @@
+# Test-only dependencies for the readMenu / editMenu Lambda handlers.
+# Not shipped in the Lambda packages or the shared layer; used to run the
+# property-based (Hypothesis) and example unit tests under build/.
+#
+#   py -m pip install -r build/requirements-test.txt
+#
+hypothesis>=6.0
+pytest>=8.0
+moto>=5.0
+boto3>=1.26

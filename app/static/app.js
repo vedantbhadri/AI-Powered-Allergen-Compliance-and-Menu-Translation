@@ -1,8 +1,10 @@
-const MENU_ID = "kiwi-cafe-queenstown";
+let MENU_ID = null;
 let allItems = [];
 let allCategories = [];
 let activeFilters = new Set();
 let currentLang = "en";
+
+let adminToken = null; // in-memory only, lost on refresh — local demo, not real auth
 
 // icon shown in the small circular badge on each allergen/diet chip.
 // emoji where a clear one-to-one match exists, otherwise a short monogram.
@@ -25,6 +27,81 @@ function chipIcon(label) {
   return CHIP_ICON[label] || label.slice(0, 2);
 }
 
+// function added when the user backs to cafe picker
+function backToCafePicker() {
+  sessionStorage.removeItem("selectedMenuId");
+  MENU_ID = null;
+  document.getElementById("mainApp").classList.add("hidden");
+  document.getElementById("cafePickerScreen").classList.remove("hidden");
+  loadCafePicker();
+}
+
+// ---------------- 
+// login / logout button toggle ----------------
+// These two are top-level functions (not nested inside loginAsAdmin) so
+// the "onclick" attribute in index.html can actually find them.
+function handleAuthClick() {
+  if (adminToken) {
+    logout();
+  } else {
+    loginAsAdmin();
+  }
+}
+
+function logout() {
+  adminToken = null;
+  sessionStorage.removeItem("adminToken");
+  document.getElementById("managementPanel").classList.add("hidden");
+  document.getElementById("adminAuthBtn").textContent = "Login as Admin";
+  renderGrid();
+}
+
+// fuction for login as admin
+function loginAsAdmin() {
+  document.getElementById("modalTitle").textContent = "Admin Login";
+  document.getElementById("modalBody").innerHTML = `
+    <div id="loginError" class="muted" style="color:#c0392b; display:none;"></div>
+    <label>Username</label>
+    <input type="text" class="form-control" id="loginUsername" />
+    <label class="mt-2">Password</label>
+    <input type="password" class="form-control" id="loginPassword" />
+    <div class="modal-actions">
+      <button class="btn btn-primary" id="loginSubmitBtn">Log in</button>
+    </div>
+  `;
+  document.getElementById("editModal").classList.remove("hidden");
+
+  const submit = async () => {
+    const username = document.getElementById("loginUsername").value.trim();
+    const password = document.getElementById("loginPassword").value.trim();
+    const errorEl = document.getElementById("loginError");
+    errorEl.style.display = "none";
+    try {
+      const res = await fetch("/api/v2/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password }),
+      });
+      if (!res.ok) throw new Error("Invalid credentials");
+      const data = await res.json();
+      adminToken = data.token;
+      sessionStorage.setItem("adminToken", adminToken);
+      document.getElementById("managementPanel").classList.remove("hidden");
+      document.getElementById("adminAuthBtn").textContent = "Logout";
+      renderGrid();
+      closeModal();
+    } catch (err) {
+      errorEl.textContent = "Login failed: " + err.message;
+      errorEl.style.display = "block";
+    }
+  };
+
+  document.getElementById("loginSubmitBtn").onclick = submit;
+  document.getElementById("loginPassword").addEventListener("keydown", e => {
+    if (e.key === "Enter") submit();
+  });
+}
+
 async function api(path, options = {}) {
   const res = await fetch(path, options);
   if (!res.ok) {
@@ -44,9 +121,27 @@ async function loadCategories() {
 }
 
 async function loadItems() {
-  const data = await api(`/api/menus/${MENU_ID}/items`);
+  const data = await api(`/api/v2/menus/${MENU_ID}`);
   allItems = data.items || [];
   renderGrid();
+}
+
+// for the inital page cafe picker
+async function loadCafePicker() {
+  const data = await api("/api/v2/restaurants");
+  const container = document.getElementById("cafePicker");
+  container.innerHTML = data.restaurants.map(r => `
+    <button class="btn btn-outline-secondary m-1" onclick="selectCafe('${r.menu_id}')">${r.menu_id}</button>
+  `).join("");
+}
+
+function selectCafe(menuId) {
+  MENU_ID = menuId;
+  sessionStorage.setItem("selectedMenuId", menuId);
+  document.getElementById("cafePickerScreen").classList.add("hidden");
+  document.getElementById("mainApp").classList.remove("hidden");
+  loadCategories();
+  loadItems();
 }
 
 function translatedView(item) {
@@ -93,7 +188,11 @@ function renderGrid() {
   }).join("");
 
   grid.querySelectorAll(".dish-card").forEach(card => {
-    card.addEventListener("click", () => openModal(card.dataset.id));
+    if (adminToken) {
+      card.addEventListener("click", () => openModal(card.dataset.id));
+    } else {
+      card.style.cursor = "default";
+    }
   });
 }
 
@@ -116,8 +215,17 @@ function openModal(itemId) {
     ? `<p class="muted">⚠ AI-only flagged: ${disagree.llm_only.join(", ") || "none"} · Rules-only flagged: ${disagree.rule_only.join(", ") || "none"}</p>`
     : `<p class="muted">AI extraction and rules-engine scan agreed on all allergens.</p>`;
 
+  // NEW: editable dish name + description fields, replacing the old
+  // read-only <p> paragraph. editMenu's backend already supports these
+  // two fields (see build_update_item_kwargs in handler.py) - this was
+  // purely a missing piece on the frontend side.
   document.getElementById("modalBody").innerHTML = `
-    <p class="muted">${escapeHtml(item.description)}</p>
+    <label>Dish name</label>
+    <input type="text" id="editName" value="${escapeHtml(item.name)}" />
+
+    <label>Description</label>
+    <textarea id="editDescription" rows="3">${escapeHtml(item.description)}</textarea>
+
     ${disagreeHtml}
     <label>Confirmed allergens (human-in-the-loop override)</label>
     <div class="allergen-checks">${checks}</div>
@@ -130,10 +238,14 @@ function openModal(itemId) {
 
   document.getElementById("saveReviewBtn").onclick = async () => {
     const selected = Array.from(document.querySelectorAll("#modalBody .allergen-checks input:checked")).map(i => i.value);
-    await api(`/api/menus/${MENU_ID}/items/${itemId}`, {
+    // NEW: read the (possibly edited) name/description and include them in
+    // the PATCH body alongside the allergen selections.
+    const name = document.getElementById("editName").value.trim();
+    const description = document.getElementById("editDescription").value.trim();
+    await api(`/api/v2/menus/${MENU_ID}/items/${itemId}`, {
       method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ confirmed_allergens: selected }),
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${adminToken}` },
+      body: JSON.stringify({ confirmed_allergens: selected, name, description }),
     });
     closeModal();
     await loadItems();
@@ -163,7 +275,7 @@ document.getElementById("filters").addEventListener("change", e => {
 document.getElementById("refreshBtn").addEventListener("click", loadItems);
 
 // ---------------- seed sample menu ----------------
-document.getElementById("seedBtn").addEventListener("click", async () => {
+document.getElementById("seedBtn")?.addEventListener("click", async () => {
   const status = document.getElementById("seedStatus");
   status.textContent = "Running OCR-skip → allergen analysis → compliance verify → translation for 8 dishes...";
   try {
@@ -220,6 +332,18 @@ document.getElementById("uploadBtn").addEventListener("click", async () => {
 
 // ---------------- init ----------------
 (async function init() {
-  await loadCategories();
-  await loadItems();
+  const remembered = sessionStorage.getItem("selectedMenuId");
+  if (remembered) {
+    selectCafe(remembered);
+  } else {
+    await loadCafePicker();
+  }
+
+  const rememberedToken = sessionStorage.getItem("adminToken");
+  if (rememberedToken) {
+    adminToken = rememberedToken;
+    document.getElementById("managementPanel").classList.remove("hidden");
+    document.getElementById("adminAuthBtn").textContent = "Logout";
+    renderGrid();
+  }
 })();

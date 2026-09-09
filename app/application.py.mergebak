@@ -14,19 +14,13 @@ Per project scope: no knowledge-base / RAG lookup is used anywhere in
 this app - allergen compliance is a deterministic rules engine
 (services/allergen_rules.py) reconciled against a Bedrock LLM pass with
 the category list embedded directly in the prompt.
-
-NOTE: this file now connects to REAL AWS (real DynamoDB table, real S3
-bucket, both already deployed by the team). There is no moto, no fake
-table creation, and no automatic seed data - the real table already
-has real dishes in it from the actual upload pipeline. Be careful what
-you edit/delete here, since it affects shared, live data.
 """
 from __future__ import annotations
 import json
 import logging
 import os
+<<<<<<< HEAD
 import sys
-from concurrent.futures import ThreadPoolExecutor
 
 # --- make the new Lambda code reachable from this old Flask app -----------
 # "sys.path.insert" just tells Python "also look in these folders" when
@@ -50,34 +44,90 @@ def _load_module(name, path):
 
 read_menu_handler = _load_module("read_menu_handler", "../build/read_menu/handler.py")
 edit_menu_handler = _load_module("edit_menu_handler", "../build/edit_menu/handler.py")
+=======
+from concurrent.futures import ThreadPoolExecutor
+>>>>>>> origin/feature/allergen-app
 
 from flask import Flask, jsonify, request, send_from_directory
 
-from services import allergen_rules, bedrock_service, dynamo_service, s3_service, textract_service, menu_parser
+from services import (
+    allergen_rules,
+    bedrock_service,
+    dynamo_service,
+    menu_parser,
+    s3_service,
+    textract_service,
+)
 
-# --- REAL AWS connection ----------------------------------------------------
-# This app now talks to the actual deployed DynamoDB table and S3 bucket in
-# the team's real AWS account (us-east-1). No moto, no fakes. Requires real
-# AWS credentials to be set in this terminal session (aws sts get-caller-identity
-# should succeed) before starting the server.
+# --- fake AWS for local testing --------------------------------------------
+# "moto" pretends to be real AWS. Once mock_aws() is started, ANY boto3
+# call anywhere in this whole program (DynamoDB, S3, Bedrock, etc.) gets
+# quietly redirected to an in-memory fake instead of the real internet.
+# This is what lets you test without an AWS account or spending anything.
+from moto import mock_aws
+
+# All fake AWS resources must agree on the same region, or DynamoDB will
+# say "resource not found" even though the table genuinely exists - it
+# will just be sitting in the "wrong" pretend region.
 os.environ.setdefault("AWS_REGION", "us-east-1")
 os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")
+os.environ["MENU_TABLE_NAME"] = "allergen-menu-items"
 
-# dynamo_service.py and editMenu's handler.py each read a differently-named
-# env var for the table - both are set here so they agree on the same real table.
-os.environ["DYNAMODB_TABLE"] = "allergen-demo-dev-menu-items"
-os.environ["MENU_TABLE_NAME"] = "allergen-demo-dev-menu-items"
+_mock = mock_aws()
+_mock.start()
 
-# s3_service.py reads this exact name (confirmed via findstr earlier).
-os.environ["S3_BUCKET"] = "allergen-demo-dev-menu-uploads-669232219904"
+import boto3
+_ddb = boto3.resource("dynamodb", region_name="us-east-1")
+
+# Create the fake DynamoDB table itself - same key design as the real one:
+# menu_id (which restaurant/menu) + item_id (which dish inside it).
+_ddb.create_table(
+    TableName="allergen-menu-items",
+    KeySchema=[
+        {"AttributeName": "menu_id", "KeyType": "HASH"},   # partition key
+        {"AttributeName": "item_id", "KeyType": "RANGE"},  # sort key
+    ],
+    AttributeDefinitions=[
+        {"AttributeName": "menu_id", "AttributeType": "S"},
+        {"AttributeName": "item_id", "AttributeType": "S"},
+    ],
+    BillingMode="PAY_PER_REQUEST",
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
+
+# Where the 8 real sample dishes (Peanut Satay, Seafood Chowder, etc.) live.
+# This MUST be defined before anything tries to open this file - that
+# ordering mistake was the bug we fixed earlier.
 SAMPLE_DATA_PATH = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "sample_data", "sample_menu.json"
 )
+
+# --- seed the fake table with the real sample menu -------------------------
+# Reads the same sample_menu.json the old "Load Sample Menu" button uses,
+# and puts each dish into the fake table under "kiwi-cafe-queenstown" -
+# the exact menu_id the frontend (app.js) already expects.
+# Allergens/translations are left empty here since this just loads the raw
+# menu; the AI pipeline (Leo's/Banu's work) is what would normally fill
+# those in.
+with open(SAMPLE_DATA_PATH, "r") as f:
+    _sample = json.load(f)
+
+_menu_table = _ddb.Table("allergen-menu-items")
+for i, dish in enumerate(_sample["items"]):
+    _menu_table.put_item(Item={
+        "menu_id": "kiwi-cafe-queenstown",
+        "item_id": f"dish-{i:04d}",
+        "name": dish["name"],
+        "description": dish["description"],
+        "status": "ready",
+        "allergens": {"confirmed": [], "display_tags": []},
+        "diet_tags": [],
+        "translations": {},
+    })
 
 application = Flask(__name__, static_folder=STATIC_DIR, static_url_path="")
 app = application  # alias - some tooling/tests look for `app`
@@ -108,13 +158,12 @@ def languages():
     return jsonify({"languages": bedrock_service.LANGUAGES})
 
 
-# ---------------------------------------------------------------- readMenu / editMenu bridge
-# These routes are the bridge to Suresh's Lambda-style functions. They don't
-# contain any real logic themselves - they just build a fake "API Gateway
-# event" dictionary (the same shape real API Gateway would send), hand it to
-# the real handler function, and pass the response back. Since dynamo_service
-# and editMenu's handler now point at the REAL table (set above), these
-# routes read/write real, shared data.
+<<<<<<< HEAD
+# ---------------------------------------------------------------- NEW: readMenu / editMenu bridge
+# These routes are the bridge to Suresh's new Lambda-style functions.
+# They don't contain any real logic themselves - they just build a fake
+# "API Gateway event" dictionary (the same shape real API Gateway would
+# send), hand it to the real handler function, and pass the response back.
 
 @application.route("/api/v2/menus/<restaurant_id>")
 def v2_get_menu(restaurant_id):
@@ -174,14 +223,19 @@ def v2_edit_item(menu_id, item_id):
     return result["body"], result["statusCode"], {"Content-Type": "application/json"}
 
 
-# ---------------------------------------------------------------- core pipeline (Bedrock + rules)
-def _run_pipeline(menu_id: str, name: str, description: str, source: str, persist: bool = True) -> dict:
-    """Shared two-step chain: (1) allergen analyze+verify (2) translate.
-
-    persist=False lets the incoming parallel-upload route analyze many
-    dishes concurrently without writing each one individually, then
-    persist them afterward - see upload_menu below.
-    """
+# ---------------------------------------------------------------- OLD core pipeline (Bedrock + rules)
+def _run_pipeline(menu_id: str, name: str, description: str, source: str) -> dict:
+=======
+# ---------------------------------------------------------------- core pipeline
+def _run_pipeline(
+    menu_id: str,
+    name: str,
+    description: str,
+    source: str,
+    persist: bool = True,
+) -> dict:
+>>>>>>> origin/feature/allergen-app
+    """Shared two-step chain: (1) allergen analyze+verify (2) translate."""
     llm_result = bedrock_service.extract_allergens(name, description)
     rule_categories = allergen_rules.scan_text_for_allergens(f"{name} {description}")
     reconciled = allergen_rules.reconcile_allergens(llm_result.get("categories", []), rule_categories)
@@ -211,7 +265,7 @@ def _run_pipeline(menu_id: str, name: str, description: str, source: str, persis
     return dynamo_service.put_item(item) if persist else item
 
 
-# ---------------------------------------------------------------- menu routes
+# ---------------------------------------------------------------- OLD menu routes
 @application.route("/api/menus")
 def get_menus():
     return jsonify({"menus": dynamo_service.list_menus()})
@@ -219,8 +273,8 @@ def get_menus():
 
 @application.route("/api/menus/<menu_id>", methods=["DELETE"])
 def delete_menu(menu_id):
-    dynamo_service.delete_menu(menu_id)
-    return jsonify({"deleted_menu": menu_id})
+    deleted_count = dynamo_service.delete_menu(menu_id)
+    return jsonify({"menu_id": menu_id, "deleted_count": deleted_count})
 
 
 @application.route("/api/menus/<menu_id>/items", methods=["GET"])
@@ -273,6 +327,11 @@ def delete_item(menu_id, item_id):
 
 
 # ---------------------------------------------------------------- upload / OCR
+def _split_ocr_lines_into_dishes(lines: list[str]) -> list[dict]:
+    """Convert Textract lines into dish cards using menu-aware heuristics."""
+    return menu_parser.parse_ocr_lines(lines)
+
+
 @application.route("/api/menus/<menu_id>/upload", methods=["POST"])
 def upload_menu(menu_id):
     if "file" not in request.files:
@@ -283,23 +342,46 @@ def upload_menu(menu_id):
 
     stored_path = s3_service.upload_raw_file(file_bytes, file.filename, content_type)
     lines = textract_service.extract_text_from_bytes(file_bytes, content_type)
-    dishes = menu_parser.parse_ocr_lines(lines)
+    if not lines:
+        return jsonify({
+            "error": "No text could be extracted from this file. Try a clearer, "
+                     "upright JPG or PNG with readable menu text.",
+            "stored_path": stored_path,
+        }), 422
+    dishes = _split_ocr_lines_into_dishes(lines)
+    if not dishes:
+        return jsonify({
+            "error": "Text was detected, but no menu dishes could be identified.",
+            "ocr_lines": lines,
+            "stored_path": stored_path,
+        }), 422
 
-    with ThreadPoolExecutor() as executor:
-        analyzed = list(executor.map(
-            lambda d: _run_pipeline(menu_id, d["name"], d["description"], source="upload", persist=False),
-            [d for d in dishes if d["name"]],
-        ))
-
-    created = [dynamo_service.put_item(item) for item in analyzed]
+    valid_dishes = [dish for dish in dishes if dish["name"]]
+    worker_count = min(int(os.environ.get("PIPELINE_WORKERS", "4")), len(valid_dishes))
+    with ThreadPoolExecutor(max_workers=max(worker_count, 1)) as executor:
+        analyzed = executor.map(
+            lambda dish: _run_pipeline(
+                menu_id,
+                dish["name"],
+                dish["description"],
+                source="upload",
+                persist=False,
+            ),
+            valid_dishes,
+        )
+        # Keep persistence sequential: boto3 resources are not guaranteed to
+        # be thread-safe, and map preserves the visual order from the menu.
+        created = [dynamo_service.put_item(item) for item in analyzed]
 
     return jsonify({"stored_path": stored_path, "ocr_lines": lines, "items": created}), 201
 
 
 # ---------------------------------------------------------------- sample data (OLD button)
-# NOTE: this now writes to the REAL table if used. Not recommended to click
-# this against the shared table without checking with the team first, since
-# it would add another 8 "sample" dishes alongside the real ones already there.
+# NOTE: this button calls the REAL Bedrock API (bedrock_service.extract_allergens
+# inside _run_pipeline). Since moto is mocking ALL of boto3 right now, and moto
+# doesn't yet support Bedrock's "converse" operation, clicking this button will
+# fail with NotImplementedError. That's expected for now - it's unrelated to
+# readMenu/editMenu and not something you need working today.
 @application.route("/api/menus/<menu_id>/seed", methods=["POST"])
 def seed_sample_menu(menu_id):
     """Loads sample_data/sample_menu.json and runs every dish through the

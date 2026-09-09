@@ -273,6 +273,29 @@ document.getElementById("filters").addEventListener("change", e => {
   renderGrid();
 });
 document.getElementById("refreshBtn").addEventListener("click", loadItems);
+document.getElementById("clearBtn").addEventListener("click", async () => {
+  if (allItems.length === 0) return;
+  const confirmed = window.confirm(
+    `Clear all ${allItems.length} dishes from the current menu? This cannot be undone.`
+  );
+  if (!confirmed) return;
+
+  const button = document.getElementById("clearBtn");
+  const status = document.getElementById("clearStatus");
+  button.disabled = true;
+  status.textContent = "Clearing dishes...";
+  try {
+    const result = await api(`/api/menus/${MENU_ID}`, { method: "DELETE" });
+    activeFilters.clear();
+    document.querySelectorAll("#filters input").forEach(input => { input.checked = false; });
+    await loadItems();
+    status.textContent = `Cleared ${result.deleted_count} dish(es). You can upload a new menu now.`;
+  } catch (err) {
+    status.textContent = `Failed: ${err.message}`;
+  } finally {
+    button.disabled = false;
+  }
+});
 
 // ---------------- seed sample menu ----------------
 document.getElementById("seedBtn")?.addEventListener("click", async () => {
@@ -309,6 +332,31 @@ document.getElementById("manualForm").addEventListener("submit", async e => {
 });
 
 // ---------------- file upload ----------------
+async function prepareUploadFile(file) {
+  const isWebp = file.type === "image/webp" || file.name.toLowerCase().endsWith(".webp");
+  if (!isWebp) return file;
+
+  const bitmap = await createImageBitmap(file);
+  const canvas = document.createElement("canvas");
+  canvas.width = bitmap.width;
+  canvas.height = bitmap.height;
+  const context = canvas.getContext("2d");
+  context.fillStyle = "#ffffff";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.drawImage(bitmap, 0, 0);
+  bitmap.close();
+
+  const jpegBlob = await new Promise((resolve, reject) => {
+    canvas.toBlob(
+      blob => blob ? resolve(blob) : reject(new Error("Could not convert WebP image.")),
+      "image/jpeg",
+      0.95,
+    );
+  });
+  const baseName = file.name.replace(/\.webp$/i, "");
+  return new File([jpegBlob], `${baseName}.jpg`, { type: "image/jpeg" });
+}
+
 document.getElementById("uploadBtn").addEventListener("click", async () => {
   const fileInput = document.getElementById("fileInput");
   const progress = document.getElementById("uploadProgress");
@@ -316,12 +364,13 @@ document.getElementById("uploadBtn").addEventListener("click", async () => {
     progress.innerHTML = `<div>Select a file first.</div>`;
     return;
   }
-  const steps = ["Uploading to S3...", "Running Textract OCR...", "Analyzing allergens (Bedrock + rules engine)...", "Translating (4 languages)...", "Saving to DynamoDB..."];
+  const steps = ["Preparing image...", "Uploading to S3...", "Running Textract OCR...", "Analyzing allergens (Bedrock + rules engine)...", "Translating (4 languages)...", "Saving to DynamoDB..."];
   progress.innerHTML = steps.map(s => `<div>${s}</div>`).join("");
 
   const formData = new FormData();
-  formData.append("file", fileInput.files[0]);
   try {
+    const uploadFile = await prepareUploadFile(fileInput.files[0]);
+    formData.append("file", uploadFile);
     const result = await api(`/api/menus/${MENU_ID}/upload`, { method: "POST", body: formData });
     progress.innerHTML += `<div>Done - ${result.items.length} dish(es) extracted.</div>`;
     await loadItems();

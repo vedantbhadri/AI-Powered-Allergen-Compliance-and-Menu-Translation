@@ -53,7 +53,7 @@ resource "aws_elastic_beanstalk_environment" "env" {
   tags                = local.common_tags
 
 
-# ---- explicit VPC/subnets (see network.tf) ----
+  # ---- explicit VPC/subnets (see network.tf) ----
   # Prevents EB from guessing subnets across AZs that may be listed for the
   # account but have no actual default subnet (the cause of the "no default
   # subnet for availability zone" CREATE_FAILED error).

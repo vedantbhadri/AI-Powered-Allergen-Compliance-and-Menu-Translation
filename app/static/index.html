@@ -71,8 +71,8 @@
       <div class="card">
         <div class="card-eyebrow">Step 2</div>
         <h3>Upload a menu file</h3>
-        <p class="muted">PDF / JPG / PNG — text is extracted with Textract OCR, then each dish runs through the same pipeline.</p>
-        <input type="file" id="fileInput" accept=".pdf,.jpg,.jpeg,.png" />
+        <p class="muted">PDF / JPG / PNG / WebP — text is extracted with Textract OCR, then each dish runs through the same pipeline.</p>
+        <input type="file" id="fileInput" accept=".pdf,.jpg,.jpeg,.png,.webp" />
         <button id="uploadBtn" class="btn">Upload &amp; Process</button>
         <div id="uploadProgress" class="progress-list"></div>
       </div>
@@ -107,8 +107,12 @@
           <label><input type="checkbox" value="Dairy-Free" /> Dairy-Free</label>
           <label><input type="checkbox" value="Vegan (self-declared - verify manually)" /> Vegan</label>
         </div>
-        <button id="refreshBtn" class="btn small">Refresh</button>
+        <div class="preview-actions">
+          <button id="refreshBtn" class="btn small">Refresh</button>
+          <button id="clearBtn" class="btn small danger">Clear dishes</button>
+        </div>
       </div>
+      <div id="clearStatus" class="status-line" aria-live="polite"></div>
 
       <div id="dishGrid" class="dish-grid"></div>
 

@@ -115,6 +115,42 @@ def delete_item(menu_id: str, item_id: str) -> None:
         raise
 
 
+def delete_menu(menu_id: str) -> int:
+    """Delete every dish belonging to a menu and return the deleted count."""
+    if LOCAL_MODE:
+        items = _load_local()
+        remaining = [item for item in items if item["menu_id"] != menu_id]
+        deleted_count = len(items) - len(remaining)
+        _save_local(remaining)
+        return deleted_count
+
+    try:
+        table = _get_table()
+        keys = []
+        query_args = {
+            "KeyConditionExpression": Key("menu_id").eq(menu_id),
+            "ProjectionExpression": "menu_id, item_id",
+        }
+        while True:
+            response = table.query(**query_args)
+            keys.extend(response.get("Items", []))
+            last_key = response.get("LastEvaluatedKey")
+            if not last_key:
+                break
+            query_args["ExclusiveStartKey"] = last_key
+
+        with table.batch_writer() as batch:
+            for key in keys:
+                batch.delete_item(Key={
+                    "menu_id": key["menu_id"],
+                    "item_id": key["item_id"],
+                })
+        return len(keys)
+    except (BotoCoreError, ClientError) as exc:
+        logger.error("DynamoDB delete_menu failed: %s", exc)
+        raise
+
+
 def list_menus() -> List[str]:
     if LOCAL_MODE:
         return sorted({i["menu_id"] for i in _load_local()})

@@ -52,6 +52,7 @@ function logout() {
   adminToken = null;
   sessionStorage.removeItem("adminToken");
   document.getElementById("managementPanel").classList.add("hidden");
+  document.querySelector("main.layout").classList.add("single-column");
   document.getElementById("adminAuthBtn").textContent = "Login as Admin";
   renderGrid();
 }
@@ -87,6 +88,7 @@ function loginAsAdmin() {
       adminToken = data.token;
       sessionStorage.setItem("adminToken", adminToken);
       document.getElementById("managementPanel").classList.remove("hidden");
+      document.querySelector("main.layout").classList.remove("single-column");
       document.getElementById("adminAuthBtn").textContent = "Logout";
       renderGrid();
       closeModal();
@@ -121,8 +123,16 @@ async function loadCategories() {
 }
 
 async function loadItems() {
-  const data = await api(`/api/v2/menus/${MENU_ID}`);
-  allItems = data.items || [];
+  try {
+    const data = await api(`/api/v2/menus/${MENU_ID}`);
+    allItems = data.items || [];
+  } catch (err) {
+    if (err.message.startsWith("404")) {
+      allItems = []; // menu genuinely has zero dishes right now -- not an error
+    } else {
+      throw err; // any other failure is a real problem, let it propagate
+    }
+  }
   renderGrid();
 }
 
@@ -381,6 +391,8 @@ document.getElementById("uploadBtn").addEventListener("click", async () => {
 
 // ---------------- init ----------------
 (async function init() {
+  // Logged-out is the starting state: single-column so there is no empty left gutter.
+  document.querySelector("main.layout").classList.add("single-column");
   const remembered = sessionStorage.getItem("selectedMenuId");
   if (remembered) {
     selectCafe(remembered);
@@ -392,6 +404,7 @@ document.getElementById("uploadBtn").addEventListener("click", async () => {
   if (rememberedToken) {
     adminToken = rememberedToken;
     document.getElementById("managementPanel").classList.remove("hidden");
+    document.querySelector("main.layout").classList.remove("single-column");
     document.getElementById("adminAuthBtn").textContent = "Logout";
     renderGrid();
   }

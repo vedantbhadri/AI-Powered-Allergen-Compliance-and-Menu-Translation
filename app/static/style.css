@@ -98,6 +98,10 @@ h1, h2, h3, .brand-title {
   align-items: start;
 
 }
+
+/* Logged-out (no Management panel): collapse to a single column so the page
+   doesn't reserve an empty 360px left gutter. Toggled from app.js. */
+.layout.single-column { grid-template-columns: 1fr; }
 @media (max-width: 900px) {
   .layout { grid-template-columns: 1fr; padding: 18px; }
 }
@@ -300,18 +304,57 @@ input[type="text"]:focus, textarea:focus {
 /* ---------- cafe picker screen ---------- */
 /* #cafePickerScreen / #cafePicker are found by app.js — IDs unchanged. */
 #cafePickerScreen {
-  max-width: 640px;
-  margin: 0 auto;
+  /* Full-bleed dark restaurant-interior backdrop. The element fills the
+     viewport and centers its content; the readable 640px column is kept via
+     the children below (max-width on h2/#cafePicker) rather than on this
+     layer, so the image covers the whole screen, not just a narrow band. */
+  position: relative;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
   padding: 56px 24px;
   text-align: center;
+  background-image: url('https://images.unsplash.com/photo-1522336572468-97b06e8ef143?fm=jpg&q=60&w=3000&auto=format&fit=crop');
+  background-size: cover;
+  background-position: center;
+}
+/* Semi-transparent dark overlay so the light text stays readable against the
+   dark photo. Sits behind the content (z-index: 0); content is lifted above. */
+#cafePickerScreen::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 0;
 }
 #cafePickerScreen h2 {
-  font-size: 24px;
-  color: var(--teal-deep);
-  margin: 0 0 20px;
+  position: relative;
+  z-index: 1;
+  max-width: 640px;
+  font-size: 28px;
+  color: #ffffff;
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.45);
+  margin: 0 0 24px;
 }
 #cafePickerScreen #cafePicker {
+  position: relative;
+  z-index: 1;
+  max-width: 640px;
   justify-content: center;
+}
+/* Cafe buttons: the base Bootstrap outline-secondary is dark-on-transparent
+   and disappears against the photo, so give them a light, legible treatment
+   scoped to this screen only (does not affect buttons elsewhere). */
+#cafePickerScreen #cafePicker .btn {
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--ink);
+  border-color: rgba(255, 255, 255, 0.92);
+}
+#cafePickerScreen #cafePicker .btn:hover {
+  background: #ffffff;
+  border-color: #ffffff;
 }
 
 /* ---------- responsive polish ---------- */

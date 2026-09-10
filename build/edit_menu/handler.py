@@ -28,6 +28,7 @@ import base64
 import binascii
 import json
 import os
+from decimal import Decimal
 from typing import Any, Dict, Optional, Tuple
 
 import boto3
@@ -74,12 +75,23 @@ class ValidationError(Exception):
         self.message = message
 
 
+def _json_default(o):
+    """json.dumps default hook: DynamoDB numbers come back as Decimal.
+
+    Convert to int when the value is integral (e.g. updated_at epoch),
+    otherwise float, so the JSON body is serializable and numerically faithful.
+    """
+    if isinstance(o, Decimal):
+        return int(o) if o == o.to_integral_value() else float(o)
+    raise TypeError(f"Object of type {type(o).__name__} is not JSON serializable")
+
+
 def _response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
     """Build an API Gateway HTTP API v2 proxy response with a JSON body."""
     return {
         "statusCode": status_code,
         "headers": {"Content-Type": "application/json"},
-        "body": json.dumps(body),
+        "body": json.dumps(body, default=_json_default),
     }
 
 

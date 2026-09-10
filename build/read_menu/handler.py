@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import json
 import re
+from decimal import Decimal
 from typing import Any, Dict, Optional
 
 from services import dynamo_service  # shared Lambda layer (from services import ...)
@@ -53,12 +54,23 @@ _SUPPORTED_LANGUAGE_CODES = ("es", "de", "ja", "zh")
 _KEY_CHARSET = re.compile(r"^[A-Za-z0-9._:#-]+$")
 
 
+def _json_default(o):
+    """json.dumps default hook: DynamoDB numbers come back as Decimal.
+
+    Convert to int when the value is integral (e.g. updated_at epoch),
+    otherwise float, so the JSON body is serializable and numerically faithful.
+    """
+    if isinstance(o, Decimal):
+        return int(o) if o == o.to_integral_value() else float(o)
+    raise TypeError(f"Object of type {type(o).__name__} is not JSON serializable")
+
+
 def _response(status: int, body: Dict[str, Any]) -> Dict[str, Any]:
     """Build an API Gateway v2 proxy response with a JSON body."""
     return {
         "statusCode": status,
         "headers": {"Content-Type": "application/json"},
-        "body": json.dumps(body),
+        "body": json.dumps(body, default=_json_default),
     }
 
 

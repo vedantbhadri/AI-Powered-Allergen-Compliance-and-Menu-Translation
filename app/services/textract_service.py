@@ -16,7 +16,8 @@ from botocore.exceptions import BotoCoreError, ClientError
 
 logger = logging.getLogger(__name__)
 
-AWS_REGION = os.environ.get("AWS_REGION", "ap-southeast-2")
+# Use TEXTRACT_REGION if set, otherwise fall back to AWS_REGION
+TEXTRACT_REGION = os.environ.get("TEXTRACT_REGION", os.environ.get("AWS_REGION", "ap-southeast-2"))
 LOCAL_MODE = os.environ.get("LOCAL_MODE", "false").lower() == "true"
 
 _client = None
@@ -25,7 +26,7 @@ _client = None
 def _get_client():
     global _client
     if _client is None:
-        _client = boto3.client("textract", region_name=AWS_REGION)
+        _client = boto3.client("textract", region_name=TEXTRACT_REGION)
     return _client
 
 

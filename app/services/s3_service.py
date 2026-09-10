@@ -14,7 +14,8 @@ from botocore.exceptions import BotoCoreError, ClientError
 
 logger = logging.getLogger(__name__)
 
-AWS_REGION = os.environ.get("AWS_REGION", "ap-southeast-2")
+# Use S3_REGION if set, otherwise fall back to AWS_REGION
+S3_REGION = os.environ.get("S3_REGION", os.environ.get("AWS_REGION", "ap-southeast-2"))
 BUCKET_NAME = os.environ.get("S3_BUCKET", "")
 LOCAL_MODE = os.environ.get("LOCAL_MODE", "false").lower() == "true"
 LOCAL_UPLOAD_DIR = os.environ.get("LOCAL_UPLOAD_DIR", "/tmp/allergen_uploads")
@@ -25,7 +26,7 @@ _client = None
 def _get_client():
     global _client
     if _client is None:
-        _client = boto3.client("s3", region_name=AWS_REGION)
+        _client = boto3.client("s3", region_name=S3_REGION)
     return _client
 
 

@@ -41,3 +41,19 @@ output "next_steps" {
        stubs instead of the LLM.
   EOT
 }
+
+
+output "knowledge_base_id" {
+  value       = var.create_knowledge_base ? aws_bedrockagent_knowledge_base.peal[0].id : ""
+  description = "Bedrock Knowledge Base ID for RAG retrieval"
+}
+
+output "knowledge_base_arn" {
+  value       = var.create_knowledge_base ? aws_bedrockagent_knowledge_base.peal[0].arn : ""
+  description = "Bedrock Knowledge Base ARN"
+}
+
+output "kb_docs_bucket" {
+  value       = var.create_knowledge_base ? aws_s3_bucket.kb_docs[0].bucket : ""
+  description = "S3 bucket containing PEAL reference documents"
+}

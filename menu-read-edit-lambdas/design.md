@@ -10,9 +10,11 @@ Gateway **HTTP API (v2)** and operate over a single shared DynamoDB table keyed 
 
 The functions **reuse two existing modules verbatim**:
 
-- `app/services/dynamo_service.py` — `list_items(menu_id)` (a single **Query**),
-  `get_item(menu_id, item_id)` (a single **GetItem**), and `list_menus()` (a single
-  **Scan**) for readMenu.
+- `app/services/dynamo_service.py` — `list_items(menu_id)` (a single **Query**) and
+  `get_item(menu_id, item_id)` (a single **GetItem**) for readMenu's per-restaurant routes.
+  readMenu's `GET /restaurants` instead issues a direct `boto3` **Scan** filtered to the
+  restaurant registry rows (rather than `dynamo_service.list_menus()`), so a restaurant's
+  existence is independent of its dish rows.
 - `app/services/allergen_rules.py` — the real `PEAL_CATEGORIES`, `to_display_tags`, and
   `derive_diet_tags` for editMenu.
 
@@ -43,8 +45,11 @@ status), **R3** (readMenu is read-only + validates input), **R4** (correct a sav
   - `list_items(menu_id) -> List[Dict]` — single **Query** on `menu_id` (needs `dynamodb:Query`).
   - `get_item(menu_id, item_id) -> Optional[Dict]` — single **GetItem** (needs `dynamodb:GetItem`).
   - `list_menus() -> List[str]` — single **Scan** projecting `menu_id`, returning a sorted
-    list of unique `menu_id` strings (needs `dynamodb:Scan`). Used by readMenu's
-    `GET /restaurants`.
+    list of unique `menu_id` strings (needs `dynamodb:Scan`). readMenu **no longer uses this**
+    for `GET /restaurants`: that route now issues its own direct `boto3` **Scan** filtered to
+    the restaurant registry rows (`record_type == "restaurant"`), projecting `{menu_id, name}`,
+    so a restaurant's existence is independent of its dish rows (see the Restaurant registry
+    item data model). Both are read-only Scans covered by the same `dynamodb:Scan` grant.
   - `put_item(item) -> Dict` — full-row **PutItem** overwrite (needs `dynamodb:PutItem`).
     editMenu **deliberately does not use this** (see [Key Decision 2](#key-decision-2-editmenu-is-updateitem-only)).
 - `app/services/allergen_rules.py` **exists and is not modified**, exposing `PEAL_CATEGORIES`
@@ -92,7 +97,7 @@ flowchart LR
     Diner --> RT2 --> RH
     Diner --> RT4 --> RH
     Kitchen --> RT3 --> EH --> AR
-    RH -->|list_items Query / get_item GetItem / list_menus Scan| DDB
+    RH -->|list_items Query / get_item GetItem / registry Scan| DDB
     EH -->|native conditional UpdateItem| DDB
 
     Producers[["Upstream producers (OUT OF SCOPE):\nupload handling, OCR/extraction,\nBedrock detection, translation"]] -.->|write dish rows\n+ upload# sentinel| DDB
@@ -210,14 +215,18 @@ sequenceDiagram
     retrieval, R2.6), `get_item(menu_id=uploadId, item_id="upload#"+uploadId)` (R2.1),
     return `{ "uploadId", "status" }` (200, R2.2–R2.4), 404 when the sentinel is absent
     (R2.5), 500 on read error leaving the sentinel unmodified (R2.7).
-  - `GET /restaurants` — no path params; `list_menus()` (a single Scan projecting
-    `menu_id`) returns a sorted list of unique `menu_id` strings, each wrapped into an
-    object as `{ "menu_id": <id> }` and returned as `{ "restaurants": [...] }` (200, R6.1).
-    An empty table yields `{ "restaurants": [] }` (200, R6.2). A `list_menus` failure
-    yields 500 with no partial list (R6.3). Read-only (R6.4).
-- **Persistence calls:** `dynamo_service.list_items` (Query), `dynamo_service.get_item`
-  (GetItem), and `dynamo_service.list_menus` (Scan) **only**. No writes of any kind
-  (R3.1, R3.4, R6.4).
+  - `GET /restaurants` — no path params; a direct `boto3` DynamoDB **Scan** filtered to the
+    dedicated restaurant registry rows (`FilterExpression = Attr("record_type").eq(
+    "restaurant")`), paginating over `LastEvaluatedKey`. Each registry row is projected to
+    `{ "menu_id", "name" }` (falling back to `menu_id` when `name` is absent), the list is
+    sorted by `menu_id`, and it is returned as `{ "restaurants": [...] }` (200, R6.1). Because
+    existence is sourced from the registry row, a restaurant with **zero dish rows** still
+    appears. No registry rows yields `{ "restaurants": [] }` (200, R6.2). A Scan failure yields
+    500 with no partial list (R6.3). Read-only — a single Scan, no writes (R6.4). This route
+    **no longer calls `list_menus()`**, which inferred restaurants from dish rows.
+- **Persistence calls:** `dynamo_service.list_items` (Query) and `dynamo_service.get_item`
+  (GetItem) for the per-restaurant routes, plus a direct `boto3` **Scan** (filtered to
+  registry rows) for `GET /restaurants` **only**. No writes of any kind (R3.1, R3.4, R6.4).
 
 ### editMenu
 
@@ -449,6 +458,35 @@ synthesize translations and does not write (R1.2).
 distinguishes the sentinel from dish rows (`dish-*`) and is the exact string readMenu
 excludes from listings (R1.4) and constructs for the status GetItem (R2.1).
 
+### Restaurant registry item (source of truth for restaurant existence; read by readMenu)
+
+A restaurant is its own dedicated **registry row**, one per restaurant, under
+`menu_id = <restaurantId>` and a reserved `item_id = "restaurant#" + <restaurantId>`:
+
+```json
+{
+  "menu_id": "kiwi-cafe-queenstown",
+  "item_id": "restaurant#kiwi-cafe-queenstown",
+  "record_type": "restaurant",
+  "name": "Kiwi Cafe Queenstown"
+}
+```
+
+This row is the **source of truth for whether a restaurant exists**, and is
+**independent of dish rows**: deleting every dish under a `menu_id` does not remove the
+restaurant from the picker, because the registry row persists. `GET /restaurants` selects
+exactly these rows via `record_type == "restaurant"` (equivalently `begins_with(item_id,
+"restaurant#")`), projecting each to `{"menu_id", "name"}` and falling back to `menu_id`
+when `name` is absent (R6.1). This contrasts with the upload-status sentinel subsection
+above (a per-upload status row) — the registry row is a per-restaurant existence marker.
+
+Contrast with the *previous* behaviour, which inferred restaurants from the set of unique
+`menu_id`s across dish rows (`list_menus()`): that made a restaurant vanish once its last
+dish was deleted. Sourcing existence from the registry row fixes that dead-end.
+
+**Creating registry rows is an out-of-scope admin write-path** (seeded manually for now);
+readMenu only reads them.
+
 ## IAM Execution Role Policies
 
 Both policies scope DynamoDB actions to the specific table ARN and include the baseline
@@ -490,9 +528,11 @@ shown for clarity; in Terraform they are composed from
 ```
 
 readMenu grants **no** write actions — enforcing R3.1 at the IAM layer as well as in code.
-It now also grants `dynamodb:Scan` (in addition to `GetItem` and `Query`) because
-`list_menus()` backing `GET /restaurants` issues a Scan projecting `menu_id` (R6.1); Scan is
-still a read action, so the read-only guarantee (R3.1) holds.
+It already grants `dynamodb:Scan` (in addition to `GetItem` and `Query`), added earlier for
+`list_menus`. `GET /restaurants` now issues its own direct Scan filtered to the restaurant
+registry rows (`record_type == "restaurant"`, R6.1) instead of `list_menus` — but a Scan is a
+Scan, so this registry Scan is **already covered by the existing `dynamodb:Scan` grant and no
+IAM change is required**. Scan is still a read action, so the read-only guarantee (R3.1) holds.
 
 ### editMenu execution role policy (R5.2 / R5.6 — UpdateItem only)
 
@@ -539,9 +579,9 @@ correction is a native `UpdateItem` (Key Decision 2).
 | `GET /menus/{uploadId}/status` | sentinel found | 200 | `{"uploadId": ..., "status": ...}` within 2s | R2.2, R2.3, R2.4 |
 | `GET /menus/{uploadId}/status` | no sentinel for uploadId | 404 | `{"error": "uploadId not found"}` | R2.5 |
 | `GET /menus/{uploadId}/status` | `get_item` read fails | 500 | `{"error": "status could not be retrieved"}` (sentinel unmodified) | R2.7, R3.6 |
-| `GET /restaurants` | one or more menu_ids present | 200 | `{"restaurants": [{"menu_id": ...}, ...]}` (sorted unique) | R6.1 |
-| `GET /restaurants` | table is empty | 200 | `{"restaurants": []}` | R6.2 |
-| `GET /restaurants` | `list_menus` read fails | 500 | `{"error": "restaurants could not be retrieved"}` (no partial) | R6.3 |
+| `GET /restaurants` | one or more registry rows present | 200 | `{"restaurants": [{"menu_id": ..., "name": ...}, ...]}` (sorted by menu_id; zero-dish restaurants still listed; name falls back to menu_id) | R6.1 |
+| `GET /restaurants` | no registry rows | 200 | `{"restaurants": []}` | R6.2 |
+| `GET /restaurants` | registry Scan read fails | 500 | `{"error": "restaurants could not be retrieved"}` (no partial) | R6.3 |
 | `PATCH /…/items/{itemId}` | missing / invalid Cognito JWT | 401 (or 403) | gateway authorizer response (editMenu not invoked, no write) | R7.1 |
 | `PATCH /…/items/{itemId}` | no correctable field in body | 400 | `{"error": "no correctable field provided"}` (no write) | R4.8 |
 | `PATCH /…/items/{itemId}` | translations include unsupported code | 400 | `{"error": "unsupported language code: <code>"}` (no write) | R4.7 |
@@ -714,13 +754,13 @@ UpdateItem fails its condition, editMenu responds HTTP 404, and no stored data i
 
 **Validates: Requirements 5.4**
 
-### Property 14: List restaurants returns exactly the unique menu_ids as objects, read-only
+### Property 14: List restaurants returns exactly the registry rows as {menu_id,name} objects, read-only
 
-*For any* set of `menu_id` strings returned by `list_menus()`, `GET /restaurants` returns a
-`restaurants` list whose objects are exactly `{"menu_id": <id>}` for each returned id, in the
-same order and with the same multiplicity `list_menus()` produced (one object per string,
-none added or dropped); the empty result yields an empty list; and no write operation is
-issued on any path.
+*For any* set of restaurant registry rows returned by the filtered Scan, `GET /restaurants`
+returns a `restaurants` list whose objects are exactly `{"menu_id": <id>, "name": <name>}` —
+one per registry row, none added or dropped — with `name` falling back to `menu_id` when the
+row omits it, sorted by `menu_id`; the empty result yields an empty list; and no write
+operation (nor any non-Scan read) is issued on any path.
 
 **Validates: Requirements 6.1, 6.2, 6.4**
 
@@ -761,9 +801,9 @@ issued on any path.
 | R5.4 | `ConditionExpression` → 404, fails closed; Error Handling table; Property 13 |
 | R5.5 | 200 with `ReturnValues=ALL_NEW` echo incl. recomputed tags; example test (200) + integration (latency) |
 | R5.6 | Single-write invariant (one conditional UpdateItem); Property 12 |
-| R6.1 | GET /restaurants endpoint; `list_menus` single Scan; menu_id string wrapped as `{menu_id}`; read-only IAM `dynamodb:Scan`; Property 14 |
-| R6.2 | Error Handling (200 empty list on empty table); Property 14; example test |
-| R6.3 | Error Handling (500, no partial list on `list_menus` failure); example test |
+| R6.1 | GET /restaurants endpoint; direct filtered Scan on registry rows (`record_type == "restaurant"`); each row projected as `{menu_id, name}` sorted by menu_id, name falls back to menu_id; existence independent of dish rows; Restaurant registry item data model; read-only IAM `dynamodb:Scan` (already granted); Property 14 |
+| R6.2 | Error Handling (200 empty list when no registry rows); Property 14; example test |
+| R6.3 | Error Handling (500, no partial list on registry Scan failure); example test |
 | R6.4 | readMenu read-only component note; read-only IAM policy (Scan is a read action); Property 14 |
 | R7.1 | JWT authorizer on `patch_menu_item` (Key Decision 5); Error Handling (401/403 before invoke) |
 | R7.2 | JWT authorizer `jwt_configuration` (audience = client id, issuer = staff pool); Key Decision 5 |

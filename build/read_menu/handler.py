@@ -12,10 +12,12 @@ Dispatch is driven by the API Gateway v2 ``routeKey`` (never by parsing the
 raw request path), so the ``{restaurantId}`` and ``{uploadId}/status`` routes
 can never be confused (design: readMenu route dispatch).
 
-readMenu is strictly READ-ONLY. It reaches DynamoDB exclusively through the
-shared, unmodified ``dynamo_service`` module (``list_items`` Query,
-``get_item`` GetItem, and ``list_menus`` Scan). No PutItem / UpdateItem /
-DeleteItem is issued anywhere in this module (R3.1, R3.4).
+readMenu is strictly READ-ONLY. It reaches DynamoDB through the shared,
+unmodified ``dynamo_service`` module (``list_items`` Query and ``get_item``
+GetItem) for the per-restaurant routes, and — for ``GET /restaurants`` — via a
+direct ``boto3`` DynamoDB Scan filtered to the dedicated restaurant registry
+rows (``record_type == "restaurant"``). No PutItem / UpdateItem / DeleteItem is
+issued anywhere in this module (R3.1, R3.4); every path is read-only.
 
 Task 2.1 scope: handler scaffold, routeKey dispatch, and shared path-param
 validation. The concrete GET path bodies are implemented in tasks 2.2 and 2.3;
@@ -24,9 +26,13 @@ they are stubbed here so the module imports and dispatches cleanly.
 from __future__ import annotations
 
 import json
+import os
 import re
 from decimal import Decimal
 from typing import Any, Dict, Optional
+
+import boto3
+from boto3.dynamodb.conditions import Attr
 
 from services import dynamo_service  # shared Lambda layer (from services import ...)
 
@@ -40,6 +46,13 @@ ROUTE_LIST_RESTAURANTS = "GET /restaurants"
 # (R1.4) — it is not a Dish_Item.
 _SENTINEL_ITEM_ID_PREFIX = "upload#"
 
+# Item_Id prefix used by a restaurant's own registry row. Since the registry-row
+# change, a restaurant's registry row lives in the SAME menu_id partition as its
+# dishes (shaped {"item_id": "restaurant#<id>", "record_type": "restaurant", ...}).
+# It is not a Dish_Item and must also be excluded from dish listings, otherwise it
+# would leak into GET /menus/{restaurantId} as a bogus dish (R1.4).
+_RESTAURANT_ITEM_ID_PREFIX = "restaurant#"
+
 # The supported translation language codes (per bedrock_service.LANGUAGES /
 # the Translations_Map contract). A read must surface each present code's entry
 # unchanged and flag every absent code as unavailable — without fabricating any
@@ -52,6 +65,33 @@ _SUPPORTED_LANGUAGE_CODES = ("es", "de", "ja", "zh")
 # separators. Anything else (whitespace, path separators, control chars, etc.)
 # is rejected as bad-charset before any DynamoDB call (R3.2).
 _KEY_CHARSET = re.compile(r"^[A-Za-z0-9._:#-]+$")
+
+# The ``record_type`` value stamped on a dedicated restaurant registry row.
+# ``GET /restaurants`` selects exactly these rows so a restaurant's existence is
+# independent of whether it has any dish rows (R6.1).
+_RESTAURANT_RECORD_TYPE = "restaurant"
+
+# DynamoDB table backing the registry Scan for GET /restaurants. Mirrors the
+# lazy-``_table()`` boto3 pattern used by build/edit_menu/handler.py so importing
+# this module never reaches AWS and tests can monkeypatch ``_table``.
+TABLE_NAME = os.environ.get("MENU_TABLE_NAME", "")
+
+# Lazily-created boto3 DynamoDB Table resource (cached in a module global so a warm
+# Lambda reuses it). Tests replace ``_table()`` or reset ``_TABLE`` to inject a fake.
+_TABLE = None
+
+
+def _table():
+    """Return (creating once) the boto3 DynamoDB ``Table`` resource for the menu table.
+
+    Cached in a module global so repeated invocations in a warm Lambda reuse the
+    same client; tests can replace this function or reset ``_TABLE`` to inject a fake.
+    Only ``GET /restaurants`` uses this — it issues a single read-only Scan.
+    """
+    global _TABLE
+    if _TABLE is None:
+        _TABLE = boto3.resource("dynamodb").Table(TABLE_NAME)
+    return _TABLE
 
 
 def _json_default(o):
@@ -109,6 +149,31 @@ def _is_sentinel_row(item: Dict[str, Any]) -> bool:
     """
     item_id = item.get("item_id")
     return isinstance(item_id, str) and item_id.startswith(_SENTINEL_ITEM_ID_PREFIX)
+
+
+def _is_non_dish_row(item: Dict[str, Any]) -> bool:
+    """
+    True when ``item`` is not a Dish_Item and must be excluded from dish listings
+    (R1.4). This is a blocklist covering every known non-dish row that can share a
+    restaurant's menu_id partition:
+
+      - the upload-status sentinel row (``item_id`` begins with ``upload#``), and
+      - the restaurant's own registry row (``item_id`` begins with ``restaurant#``,
+        or, defensively, ``record_type == "restaurant"`` in case a registry row's
+        item_id were ever shaped differently).
+
+    Kept as a blocklist rather than a ``dish-`` allowlist so legitimately-stored
+    dish rows that may not follow the ``dish-`` convention on the live table are
+    still listed.
+    """
+    if _is_sentinel_row(item):
+        return True
+    item_id = item.get("item_id")
+    if isinstance(item_id, str) and item_id.startswith(_RESTAURANT_ITEM_ID_PREFIX):
+        return True
+    if item.get("record_type") == _RESTAURANT_RECORD_TYPE:
+        return True
+    return False
 
 
 def _annotate_translations(dish: Dict[str, Any]) -> Dict[str, Any]:
@@ -169,13 +234,16 @@ def _handle_list_menu(event: Dict[str, Any]) -> Dict[str, Any]:
     if not rows:
         return _error(404, "restaurant not found")
 
-    # Partition exists (>=1 row). Build the dish collection: exclude the
-    # upload# sentinel (R1.4) and annotate translations (R1.2). An empty dish
-    # collection is a valid 200 (R1.3/R1.5).
+    # Partition exists (>=1 row). Build the dish collection: exclude every
+    # non-dish row — the upload# sentinel AND the restaurant's own registry row
+    # (R1.4) — and annotate translations (R1.2). A partition that holds only
+    # non-dish rows (e.g. a registry-only partition) still represents an existing
+    # restaurant, so it yields a valid 200 with an empty dish collection, never a
+    # 404 (R1.3/R1.5).
     items = [
         _annotate_translations(row)
         for row in rows
-        if not _is_sentinel_row(row)
+        if not _is_non_dish_row(row)
     ]
     return _response(200, {"items": items})
 
@@ -216,29 +284,56 @@ def _handle_upload_status(event: Dict[str, Any]) -> Dict[str, Any]:
 
 def _handle_list_restaurants(event: Dict[str, Any]) -> Dict[str, Any]:
     """
-    GET /restaurants — list every restaurant/menu ID in the table (R6).
+    GET /restaurants — list every registered restaurant in the table (R6).
 
     Powers the frontend "select your cafe" picker for both the public customer
     browsing view and the restaurant/admin login. There are no path parameters
-    to validate. Behaviour:
+    to validate.
 
-      - ``dynamo_service.list_menus()`` — a single Scan projecting ``menu_id``
-        that returns a sorted list of unique menu_id STRINGS (R6.1).
-      - Each bare menu_id string is wrapped into an object ``{"menu_id": mid}``
-        and returned as ``{"restaurants": [...]}`` with HTTP 200. An empty table
-        yields ``{"restaurants": []}`` (R6.2).
-      - A ``list_menus`` failure -> 500 "restaurants could not be retrieved"
-        with no partial list returned (R6.3).
+    A restaurant is its own dedicated **registry row** — the source of truth for
+    restaurant existence — and is INDEPENDENT of whether it has any dish rows. A
+    registry row is shaped ``{"menu_id": <id>, "item_id": "restaurant#<id>",
+    "record_type": "restaurant", "name": <display name>}``. This route therefore
+    reads the registry directly rather than inferring restaurants from dish rows,
+    so a restaurant whose dishes were all deleted still appears in the picker.
 
-    Read-only: no write of any kind is issued (R6.4 / R3.1).
+    Behaviour:
+
+      - A direct ``boto3`` DynamoDB **Scan** filtered to registry rows
+        (``FilterExpression = Attr("record_type").eq("restaurant")``), paginating
+        over ``LastEvaluatedKey`` so no rows are missed (R6.1).
+      - Each registry row becomes ``{"menu_id": <menu_id>, "name": <name>}``,
+        falling back to the ``menu_id`` when ``name`` is absent so the picker always
+        has a label. The list is sorted by ``menu_id`` for deterministic output and
+        returned as ``{"restaurants": [...]}`` with HTTP 200. No registry rows yields
+        ``{"restaurants": []}`` (R6.2).
+      - Any Scan failure -> 500 "restaurants could not be retrieved" with no partial
+        list returned; fail closed (R6.3).
+
+    Read-only: this route issues only a Scan; no write of any kind (R6.4 / R3.1).
     """
     try:
-        menu_ids = dynamo_service.list_menus()
+        rows = []
+        scan_kwargs: Dict[str, Any] = {
+            "FilterExpression": Attr("record_type").eq(_RESTAURANT_RECORD_TYPE),
+        }
+        table = _table()
+        while True:
+            response = table.scan(**scan_kwargs)
+            rows.extend(response.get("Items", []))
+            last_key = response.get("LastEvaluatedKey")
+            if not last_key:
+                break
+            scan_kwargs["ExclusiveStartKey"] = last_key
     except Exception:  # noqa: BLE001 — any read failure is a 500 (R6.3).
         # Fail closed: no partial list is returned.
         return _error(500, "restaurants could not be retrieved")
 
-    restaurants = [{"menu_id": mid} for mid in menu_ids]
+    restaurants = [
+        {"menu_id": row.get("menu_id"), "name": row.get("name") or row.get("menu_id")}
+        for row in rows
+    ]
+    restaurants.sort(key=lambda r: r["menu_id"])
     return _response(200, {"restaurants": restaurants})
 
 

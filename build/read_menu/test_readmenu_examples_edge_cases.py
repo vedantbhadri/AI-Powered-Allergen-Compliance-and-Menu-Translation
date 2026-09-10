@@ -120,6 +120,69 @@ def test_list_sentinel_only_partition_returns_200_empty_items(install_dynamo):
     assert body == {"items": []}
 
 
+def test_list_menu_registry_only_partition_returns_200_empty(install_dynamo):
+    """A partition holding ONLY the restaurant registry row returns 200 empty (R1.3).
+
+    Since the registry-row change, a restaurant's own registry row lives in the
+    SAME menu_id partition as its dishes. A partition that contains only that
+    registry row (and no dish rows) is still an EXISTING restaurant, so it must
+    yield 200 with an empty dish collection — the registry row must NOT leak in as
+    a bogus dish, and it must not be treated as a 404 (R3.3).
+    """
+    restaurant = "kiwi-cafe"
+    registry_only = [
+        {
+            "menu_id": restaurant,
+            "item_id": f"restaurant#{restaurant}",
+            "record_type": "restaurant",
+            "name": "Kiwi Cafe",
+        }
+    ]
+    install_dynamo(_FakeDynamo(list_result=registry_only))
+
+    response = handler.handler(_list_event(restaurant))
+
+    assert response["statusCode"] == 200
+    assert _body(response) == {"items": []}
+
+
+def test_list_menu_excludes_registry_and_sentinel_keeps_dish(install_dynamo):
+    """A mixed partition returns only real dish rows, excluding non-dish rows (R1.4).
+
+    Given one dish row, the restaurant's registry row, and the upload# sentinel in
+    the same partition, only the dish row is surfaced; both the registry row and
+    the sentinel are filtered out.
+    """
+    restaurant = "kiwi-cafe"
+    mixed = [
+        {
+            "menu_id": restaurant,
+            "item_id": "dish-0001",
+            "name": "Flat White",
+        },
+        {
+            "menu_id": restaurant,
+            "item_id": f"restaurant#{restaurant}",
+            "record_type": "restaurant",
+            "name": "Kiwi Cafe",
+        },
+        {
+            "menu_id": restaurant,
+            "item_id": f"upload#{restaurant}",
+            "status": "ready",
+        },
+    ]
+    install_dynamo(_FakeDynamo(list_result=mixed))
+
+    response = handler.handler(_list_event(restaurant))
+
+    assert response["statusCode"] == 200
+    body = _body(response)
+    assert len(body["items"]) == 1
+    assert body["items"][0]["item_id"] == "dish-0001"
+    assert body["items"][0]["name"] == "Flat White"
+
+
 def test_list_zero_row_partition_returns_404(install_dynamo):
     """An empty partition (unknown restaurant) returns 404 (R3.3)."""
     install_dynamo(_FakeDynamo(list_result=[]))

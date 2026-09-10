@@ -1,23 +1,32 @@
-# Feature: menu-read-edit-lambdas, Property 14: List restaurants returns exactly the unique menu_ids as objects, read-only
+# Feature: menu-read-edit-lambdas, Property 14: List restaurants returns exactly the registry rows as {menu_id,name} objects, read-only
 """
-Tests for readMenu's ``GET /restaurants`` endpoint (task 11.4, Requirement 6).
+Tests for readMenu's ``GET /restaurants`` endpoint (Requirement 6).
+
+The route reads dedicated **restaurant registry rows** — the source of truth for
+restaurant existence, independent of dish rows — via a direct ``boto3`` DynamoDB
+Scan filtered to ``record_type == "restaurant"``. A registry row is shaped
+``{"menu_id": <id>, "item_id": "restaurant#<id>", "record_type": "restaurant",
+"name": <display name>}``.
 
 Covers:
-  - 200 with each menu_id wrapped as ``{"menu_id": ...}`` for the set returned by a
-    mocked ``dynamo_service.list_menus`` (R6.1), order + multiplicity preserved.
-  - 200 with an empty ``restaurants`` list when ``list_menus`` returns ``[]`` (R6.2).
-  - 500 ``{"error": "restaurants could not be retrieved"}`` when ``list_menus`` raises,
+  - 200 with each registry row projected to ``{"menu_id", "name"}``, sorted by
+    ``menu_id`` (R6.1).
+  - 200 with an empty ``restaurants`` list when no registry rows exist (R6.2).
+  - 500 ``{"error": "restaurants could not be retrieved"}`` when the Scan raises,
     with no partial list (R6.3).
-  - ``get_item`` / ``list_items`` are NOT called for this route (R6.4 read-only, no
-    per-restaurant reads).
+  - Only a Scan is issued — no get_item / query / put / update / delete — so the
+    route is strictly read-only (R6.4).
+  - Scan pagination over ``LastEvaluatedKey`` is handled (multi-page fake).
+  - A restaurant whose registry row exists but which has ZERO dish rows still
+    appears in the listing (the key regression this change fixes).
 
 Plus Property 14 as a Hypothesis property test.
 
-DynamoDB is MOCKED: ``dynamo_service`` is swapped for an in-memory fake that records
-which functions were called. No AWS is contacted. The property test installs/restores
-the mock per generated input via a ``@contextmanager`` (NOT the function-scoped
-``monkeypatch`` fixture) so it is safe to pair with ``@given`` — mirroring the pattern in
-``test_property4_status_faithful.py``.
+DynamoDB is MOCKED: ``handler._table`` is swapped for a fake table whose ``.scan``
+returns registry rows. No AWS is contacted. The property test installs/restores the
+fake per generated input via a ``@contextmanager`` (NOT the function-scoped
+``monkeypatch`` fixture) so it is safe to pair with ``@given`` — mirroring the pattern
+in ``build/edit_menu/test_property11_status_human_verified.py``.
 """
 from __future__ import annotations
 
@@ -48,34 +57,86 @@ handler = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(handler)
 
 
-class _FakeDynamo:
-    """Fake dynamo_service recording calls to each read function.
+def _registry_row(menu_id, name=None):
+    """Build a canonical restaurant registry row (optionally without a ``name``)."""
+    row = {
+        "menu_id": menu_id,
+        "item_id": "restaurant#" + menu_id,
+        "record_type": "restaurant",
+    }
+    if name is not None:
+        row["name"] = name
+    return row
 
-    ``list_menus`` returns canned data or raises when configured; ``get_item`` /
-    ``list_items`` record calls so tests can assert they are never used by this route.
-    No write methods exist, so readMenu stays read-only.
+
+class _FakeTable:
+    """Fake DynamoDB Table backing the registry Scan.
+
+    ``pages`` is a list of ``Items`` lists; ``.scan`` returns them one at a time,
+    setting ``LastEvaluatedKey`` on all but the last so pagination is exercised. When
+    ``fail`` is set the Scan raises, simulating a read failure. Every ``.scan`` call is
+    recorded, and calling any other DynamoDB verb records it too so tests can assert the
+    route is read-only.
     """
 
-    def __init__(self, *, menus=None, fail_menus=False):
-        self._menus = list(menus) if menus is not None else []
-        self._fail_menus = fail_menus
-        self.list_menus_calls = 0
-        self.get_item_calls = []
-        self.list_items_calls = []
+    # Verbs that must NEVER be used by this read-only route.
+    _FORBIDDEN = (
+        "get_item",
+        "query",
+        "put_item",
+        "update_item",
+        "delete_item",
+        "batch_writer",
+    )
 
-    def list_menus(self):
-        self.list_menus_calls += 1
-        if self._fail_menus:
-            raise RuntimeError("injected list_menus read failure")
-        return list(self._menus)
+    def __init__(self, *, pages=None, fail=False):
+        # Default to a single empty page when nothing is provided.
+        self._pages = list(pages) if pages is not None else [[]]
+        self._fail = fail
+        self.scan_calls = []
+        self.forbidden_calls = []
 
-    def get_item(self, menu_id, item_id):
-        self.get_item_calls.append({"menu_id": menu_id, "item_id": item_id})
-        return None
+    def scan(self, **kwargs):
+        self.scan_calls.append(kwargs)
+        if self._fail:
+            raise RuntimeError("injected Scan read failure")
+        # Which page to return is driven by how many scans have run so far.
+        index = len(self.scan_calls) - 1
+        if index >= len(self._pages):
+            return {"Items": []}
+        items = self._pages[index]
+        result = {"Items": list(items)}
+        if index < len(self._pages) - 1:
+            # Signal there is another page to fetch.
+            result["LastEvaluatedKey"] = {"menu_id": f"__page_{index}__"}
+        return result
 
-    def list_items(self, menu_id):
-        self.list_items_calls.append(menu_id)
-        return []
+    def __getattr__(self, name):
+        # Any non-scan DynamoDB verb access is a read-only violation; record and raise.
+        if name in self._FORBIDDEN:
+            def _forbidden(*args, **kwargs):
+                self.forbidden_calls.append(name)
+                raise AssertionError(f"read-only route issued {name}")
+            return _forbidden
+        raise AttributeError(name)
+
+
+@contextmanager
+def _install_table(fake):
+    """Swap handler._table for a callable returning ``fake`` and reset the cache.
+
+    Restores the original ``_table`` and ``_TABLE`` afterwards. Used instead of the
+    function-scoped ``monkeypatch`` fixture so it pairs safely with ``@given``.
+    """
+    original_table = handler._table
+    original_cache = handler._TABLE
+    handler._TABLE = None
+    handler._table = lambda: fake
+    try:
+        yield fake
+    finally:
+        handler._table = original_table
+        handler._TABLE = original_cache
 
 
 def _restaurants_event():
@@ -87,57 +148,88 @@ def _body(response):
     return json.loads(response["body"])
 
 
-@contextmanager
-def _mocked_dynamo(fake):
-    """Swap handler.dynamo_service for ``fake`` for the block's duration, then restore.
-
-    Used instead of the function-scoped ``monkeypatch`` fixture so the mock is installed
-    and torn down for EACH Hypothesis-generated input. No AWS is contacted.
-    """
-    original = handler.dynamo_service
-    handler.dynamo_service = fake
-    try:
-        yield fake
-    finally:
-        handler.dynamo_service = original
-
-
 # --- Example / edge-case tests -----------------------------------------------
 
-def test_list_restaurants_wraps_each_menu_id(monkeypatch):
-    """A set of menu_ids is returned wrapped as {"menu_id": ...} objects (R6.1)."""
-    menus = ["kiwi-cafe-queenstown", "otago-bistro", "wellington-diner"]
-    fake = _FakeDynamo(menus=menus)
-    monkeypatch.setattr(handler, "dynamo_service", fake)
+def test_list_restaurants_projects_registry_rows_sorted(monkeypatch):
+    """Registry rows -> 200 with {menu_id,name} objects, sorted by menu_id (R6.1)."""
+    fake = _FakeTable(pages=[[
+        _registry_row("wellington-diner", "Wellington Diner"),
+        _registry_row("kiwi-cafe-queenstown", "Kiwi Cafe"),
+        _registry_row("otago-bistro", "Otago Bistro"),
+    ]])
+    monkeypatch.setattr(handler, "_TABLE", None, raising=False)
+    monkeypatch.setattr(handler, "_table", lambda: fake)
 
     response = handler.handler(_restaurants_event())
 
     assert response["statusCode"] == 200
     assert _body(response) == {
-        "restaurants": [{"menu_id": m} for m in menus]
+        "restaurants": [
+            {"menu_id": "kiwi-cafe-queenstown", "name": "Kiwi Cafe"},
+            {"menu_id": "otago-bistro", "name": "Otago Bistro"},
+            {"menu_id": "wellington-diner", "name": "Wellington Diner"},
+        ]
     }
-    # A single list_menus Scan backs the route; no per-restaurant reads (R6.4).
-    assert fake.list_menus_calls == 1
-    assert fake.get_item_calls == []
-    assert fake.list_items_calls == []
+    # Exactly one Scan page was read; no forbidden verbs (R6.4).
+    assert len(fake.scan_calls) == 1
+    assert fake.forbidden_calls == []
 
 
-def test_list_restaurants_empty_table_returns_200_empty(monkeypatch):
-    """An empty table (list_menus returns []) yields 200 with an empty list (R6.2)."""
-    fake = _FakeDynamo(menus=[])
-    monkeypatch.setattr(handler, "dynamo_service", fake)
+def test_list_restaurants_name_falls_back_to_menu_id(monkeypatch):
+    """A registry row without a ``name`` falls back to its menu_id as the label."""
+    fake = _FakeTable(pages=[[_registry_row("nameless-cafe")]])
+    monkeypatch.setattr(handler, "_TABLE", None, raising=False)
+    monkeypatch.setattr(handler, "_table", lambda: fake)
+
+    response = handler.handler(_restaurants_event())
+
+    assert response["statusCode"] == 200
+    assert _body(response) == {
+        "restaurants": [{"menu_id": "nameless-cafe", "name": "nameless-cafe"}]
+    }
+
+
+def test_list_restaurants_paginates_over_last_evaluated_key(monkeypatch):
+    """Two Scan pages joined via LastEvaluatedKey are both included (R6.1)."""
+    fake = _FakeTable(pages=[
+        [_registry_row("alpha-cafe", "Alpha Cafe")],
+        [_registry_row("beta-bistro", "Beta Bistro")],
+    ])
+    monkeypatch.setattr(handler, "_TABLE", None, raising=False)
+    monkeypatch.setattr(handler, "_table", lambda: fake)
+
+    response = handler.handler(_restaurants_event())
+
+    assert response["statusCode"] == 200
+    assert _body(response) == {
+        "restaurants": [
+            {"menu_id": "alpha-cafe", "name": "Alpha Cafe"},
+            {"menu_id": "beta-bistro", "name": "Beta Bistro"},
+        ]
+    }
+    # Two scans: the first returned LastEvaluatedKey, the second finished the page walk.
+    assert len(fake.scan_calls) == 2
+    assert "ExclusiveStartKey" in fake.scan_calls[1]
+
+
+def test_list_restaurants_empty_returns_200_empty(monkeypatch):
+    """No registry rows -> 200 with an empty list (R6.2)."""
+    fake = _FakeTable(pages=[[]])
+    monkeypatch.setattr(handler, "_TABLE", None, raising=False)
+    monkeypatch.setattr(handler, "_table", lambda: fake)
 
     response = handler.handler(_restaurants_event())
 
     assert response["statusCode"] == 200
     assert _body(response) == {"restaurants": []}
-    assert fake.list_menus_calls == 1
+    assert len(fake.scan_calls) == 1
 
 
-def test_list_restaurants_read_failure_returns_500_no_partial(monkeypatch):
-    """A raising list_menus yields 500 with no partial list (R6.3)."""
-    fake = _FakeDynamo(fail_menus=True)
-    monkeypatch.setattr(handler, "dynamo_service", fake)
+def test_list_restaurants_scan_failure_returns_500_no_partial(monkeypatch):
+    """A raising Scan yields 500 with no partial list (R6.3)."""
+    fake = _FakeTable(fail=True)
+    monkeypatch.setattr(handler, "_TABLE", None, raising=False)
+    monkeypatch.setattr(handler, "_table", lambda: fake)
 
     response = handler.handler(_restaurants_event())
 
@@ -147,45 +239,80 @@ def test_list_restaurants_read_failure_returns_500_no_partial(monkeypatch):
     assert "restaurants" not in body  # no partial list returned
 
 
-def test_list_restaurants_does_not_call_get_item_or_list_items(monkeypatch):
-    """The route uses only list_menus — never get_item / list_items (R6.4)."""
-    fake = _FakeDynamo(menus=["a", "b"])
-    monkeypatch.setattr(handler, "dynamo_service", fake)
+def test_list_restaurants_is_read_only(monkeypatch):
+    """The route issues only a Scan — no get_item / query / write verbs (R6.4)."""
+    fake = _FakeTable(pages=[[_registry_row("a", "A"), _registry_row("b", "B")]])
+    monkeypatch.setattr(handler, "_TABLE", None, raising=False)
+    monkeypatch.setattr(handler, "_table", lambda: fake)
 
     handler.handler(_restaurants_event())
 
-    assert fake.get_item_calls == []
-    assert fake.list_items_calls == []
+    assert fake.forbidden_calls == []
+    assert len(fake.scan_calls) == 1
+
+
+def test_restaurant_with_zero_dishes_still_listed(monkeypatch):
+    """A restaurant with a registry row but ZERO dish rows still appears (regression).
+
+    The fake Scan returns exactly one registry row and no dish rows; the restaurant
+    must still show up in GET /restaurants because existence is sourced from the
+    registry, not from dish rows.
+    """
+    fake = _FakeTable(pages=[[
+        {
+            "menu_id": "empty-cafe",
+            "item_id": "restaurant#empty-cafe",
+            "record_type": "restaurant",
+            "name": "Empty Cafe",
+        }
+    ]])
+    monkeypatch.setattr(handler, "_TABLE", None, raising=False)
+    monkeypatch.setattr(handler, "_table", lambda: fake)
+
+    response = handler.handler(_restaurants_event())
+
+    assert response["statusCode"] == 200
+    assert {"menu_id": "empty-cafe", "name": "Empty Cafe"} in _body(response)["restaurants"]
 
 
 # --- Property 14 -------------------------------------------------------------
 
-# menu_id strings resemble restaurant slugs / upload ids: the handler applies no
-# validation on this route, so any non-empty string is a valid stored id.
+# menu_id strings resemble restaurant slugs: the handler applies no validation on this
+# route, so any non-empty string is a valid stored id. Keep them unique within a set so
+# the sorted projection is unambiguous.
 _MENU_ID_CHARS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._:#-"
-menu_id_lists = st.lists(
-    st.text(alphabet=_MENU_ID_CHARS, min_size=1, max_size=40),
+_menu_id = st.text(alphabet=_MENU_ID_CHARS, min_size=1, max_size=40)
+
+# A registry row: a menu_id plus an OPTIONAL name (None means the row omits ``name``).
+registry_rows = st.lists(
+    st.tuples(_menu_id, st.one_of(st.none(), st.text(max_size=40))),
     min_size=0,
     max_size=25,
+    unique_by=lambda pair: pair[0],
 )
 
 
 @settings(max_examples=200)
-@given(menus=menu_id_lists)
-def test_property14_list_restaurants_wraps_exactly(menus):
-    """Property 14: the response contains exactly one {"menu_id": id} object per id
-    returned by list_menus, in the same order and multiplicity, empty stays empty, and
-    no write op is issued (get_item/list_items untouched)."""
-    fake = _FakeDynamo(menus=menus)
-    with _mocked_dynamo(fake):
+@given(rows=registry_rows)
+def test_property14_list_restaurants_projects_registry_rows(rows):
+    """Property 14: the response contains exactly one {"menu_id","name"} object per
+    registry row (sorted by menu_id), name falling back to menu_id when absent, empty
+    stays empty, and the route is read-only (only a Scan is issued)."""
+    fake_rows = [_registry_row(mid, name) for mid, name in rows]
+    fake = _FakeTable(pages=[fake_rows])
+
+    with _install_table(fake):
         response = handler.handler(_restaurants_event())
 
     assert response["statusCode"] == 200
     body = _body(response)
-    # Exactly the returned ids, wrapped, order + multiplicity preserved.
-    assert body == {"restaurants": [{"menu_id": m} for m in menus]}
 
-    # Read-only: exactly one Scan, no per-restaurant reads (R6.4).
-    assert fake.list_menus_calls == 1
-    assert fake.get_item_calls == []
-    assert fake.list_items_calls == []
+    expected = sorted(
+        ({"menu_id": mid, "name": (name or mid)} for mid, name in rows),
+        key=lambda r: r["menu_id"],
+    )
+    assert body == {"restaurants": expected}
+
+    # Read-only: exactly one Scan page here, and no forbidden verbs (R6.4).
+    assert len(fake.scan_calls) == 1
+    assert fake.forbidden_calls == []

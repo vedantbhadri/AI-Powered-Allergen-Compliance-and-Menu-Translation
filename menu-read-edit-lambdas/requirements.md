@@ -62,6 +62,12 @@ spec's concern.
   excludes it from customer-facing dish listings.
 - **Upload_Status**: The `status` value on the Status_Sentinel, indicating whether an
   upload is still processing or has finished (done/ready).
+- **Restaurant_Registry_Row**: A dedicated non-dish row that is the source of truth for a
+  restaurant's existence, independent of whether the restaurant has any Dish_Items. It is
+  keyed under `menu_id = <restaurantId>` and `item_id = "restaurant#" + <restaurantId>`,
+  carries `record_type = "restaurant"` and a display `name`, and is read by readMenu's
+  `GET /restaurants` picker. Creating registry rows is an out-of-scope admin write-path
+  (seeded manually for now); readMenu only reads them.
 - **Human_Verified**: The dish `status` value `human_verified`, set by editMenu when a
   correction is applied to a dish.
 - **Staff_Pool**: The existing Cognito User Pool (`aws_cognito_user_pool.staff_pool`) and
@@ -148,10 +154,12 @@ spec's concern.
 
 #### Acceptance Criteria
 
-1. WHEN a request to list all restaurants is received, THE readMenu SHALL return every unique Menu_Id present in the table, retrieved via `Dynamo_Service.list_menus` (a single Scan), with each Menu_Id represented as an object of the form `{"menu_id": <Menu_Id>}`.
-2. WHEN the table contains no rows, THE readMenu SHALL respond with HTTP status 200 and an empty restaurant list.
-3. IF the `Dynamo_Service.list_menus` read fails, THEN THE readMenu SHALL respond with HTTP status 500 and an error description indicating the restaurants could not be retrieved, and SHALL NOT return a partial restaurant list.
-4. THE readMenu SHALL serve the list-all-restaurants request as a read-only operation, issuing no PutItem, UpdateItem, or DeleteItem, and SHALL require no path parameters.
+1. WHEN a request to list all restaurants is received, THE readMenu SHALL return every Restaurant_Registry_Row present in the table — identified by `record_type == "restaurant"` (equivalently, an `item_id` beginning with `restaurant#`) — retrieved via a Scan filtered to those registry rows, with each row represented as an object of the form `{"menu_id": <Menu_Id>, "name": <display name>}`; WHEN a registry row carries no `name`, THE readMenu SHALL fall back to its `menu_id` as the name so every entry has a label. Restaurant existence is sourced from these dedicated registry rows and is INDEPENDENT of dish rows: a restaurant SHALL still appear as long as its registry row exists, even when it has zero dish rows. The returned list SHALL be sorted by `menu_id`.
+2. WHEN the table contains no Restaurant_Registry_Row, THE readMenu SHALL respond with HTTP status 200 and an empty restaurant list.
+3. IF the registry Scan read fails, THEN THE readMenu SHALL respond with HTTP status 500 and an error description indicating the restaurants could not be retrieved, and SHALL NOT return a partial restaurant list.
+4. THE readMenu SHALL serve the list-all-restaurants request as a read-only operation, issuing only a Scan and no PutItem, UpdateItem, or DeleteItem, and SHALL require no path parameters.
+
+> **Out of scope:** The admin write-path that CREATES Restaurant_Registry_Rows is explicitly out of scope for this feature; registry rows are seeded manually for now. This requirement covers only reading them.
 
 ### Requirement 7: Admin authentication for editing
 

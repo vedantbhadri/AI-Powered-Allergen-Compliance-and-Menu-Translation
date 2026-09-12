@@ -5,7 +5,7 @@ let activeFilters = new Set();
 let currentLang = "en";
 
 let adminToken = null; // in-memory only, lost on refresh — local demo, not real auth
-
+let restaurantDisplayNames = {};
 // icon shown in the small circular badge on each allergen/diet chip.
 // emoji where a clear one-to-one match exists, otherwise a short monogram.
 const CHIP_ICON = {
@@ -25,6 +25,12 @@ const CHIP_ICON = {
 };
 function chipIcon(label) {
   return CHIP_ICON[label] || label.slice(0, 2);
+}
+
+function setAdminUIVisible(visible) {
+  document.getElementById("managementPanel").classList.toggle("hidden", !visible);
+  document.querySelectorAll(".admin-only").forEach(el => el.classList.toggle("hidden", !visible));
+  document.querySelector("main.layout").classList.toggle("single-column", !visible);
 }
 
 // function added when the user backs to cafe picker
@@ -51,8 +57,7 @@ function handleAuthClick() {
 function logout() {
   adminToken = null;
   sessionStorage.removeItem("adminToken");
-  document.getElementById("managementPanel").classList.add("hidden");
-  document.querySelector("main.layout").classList.add("single-column");
+    setAdminUIVisible(false);
   document.getElementById("adminAuthBtn").textContent = "Login as Admin";
   renderGrid();
 }
@@ -87,8 +92,7 @@ function loginAsAdmin() {
       const data = await res.json();
       adminToken = data.token;
       sessionStorage.setItem("adminToken", adminToken);
-      document.getElementById("managementPanel").classList.remove("hidden");
-      document.querySelector("main.layout").classList.remove("single-column");
+      setAdminUIVisible(true);
       document.getElementById("adminAuthBtn").textContent = "Logout";
       renderGrid();
       closeModal();
@@ -139,15 +143,23 @@ async function loadItems() {
 // for the inital page cafe picker
 async function loadCafePicker() {
   const data = await api("/api/v2/restaurants");
+  restaurantDisplayNames = {};
+  data.restaurants.forEach(r => { restaurantDisplayNames[r.menu_id] = r.name || r.menu_id; });
   const container = document.getElementById("cafePicker");
   container.innerHTML = data.restaurants.map(r => `
-    <button class="btn btn-outline-secondary m-1" onclick="selectCafe('${r.menu_id}')">${r.menu_id}</button>
+    <button class="btn btn-outline-secondary m-1" onclick="selectCafe('${r.menu_id}')">${escapeHtml(r.name || r.menu_id)}</button>
   `).join("");
 }
-
+function updateBrandHeader(name) {
+  const titleEl = document.querySelector(".brand-title");
+  if (titleEl) titleEl.textContent = name;
+}
 function selectCafe(menuId) {
   MENU_ID = menuId;
+  const name = restaurantDisplayNames[menuId] || sessionStorage.getItem("selectedMenuName") || menuId;
   sessionStorage.setItem("selectedMenuId", menuId);
+  sessionStorage.setItem("selectedMenuName", name);
+  updateBrandHeader(name);
   document.getElementById("cafePickerScreen").classList.add("hidden");
   document.getElementById("mainApp").classList.remove("hidden");
   loadCategories();
@@ -173,8 +185,13 @@ function passesFilters(item) {
 function renderGrid() {
   const grid = document.getElementById("dishGrid");
   const visible = allItems.filter(passesFilters);
-  if (visible.length === 0) {
-    grid.innerHTML = `<p class="muted">No dishes yet - load the sample menu, upload a file, or add one manually.</p>`;
+     if (visible.length === 0) {
+    grid.innerHTML = adminToken
+      ? `<div class="empty-state">
+          <h4>No dishes yet</h4>
+          <p class="muted">Please upload a menu or add it manually.</p>
+        </div>`
+      : "";
     return;
   }
   grid.innerHTML = visible.map(item => {
@@ -301,7 +318,7 @@ document.getElementById("clearBtn").addEventListener("click", async () => {
     await loadItems();
     status.textContent = `Cleared ${result.deleted_count} dish(es). You can upload a new menu now.`;
   } catch (err) {
-    status.textContent = `Failed: ${err.message}`;
+    status.innerHTML = `<span class="error-line">${simplifyError(err)}</span>`;
   } finally {
     button.disabled = false;
   }
@@ -315,9 +332,9 @@ document.getElementById("seedBtn")?.addEventListener("click", async () => {
     await api(`/api/menus/${MENU_ID}/seed`, { method: "POST" });
     status.textContent = "Sample menu loaded.";
     await loadItems();
-  } catch (err) {
-    status.textContent = `Failed: ${err.message}`;
-  }
+ } catch (err) {
+      status.innerHTML = `<span class="error-line">${simplifyError(err)}</span>`;
+    }
 });
 
 // ---------------- manual add ----------------
@@ -336,9 +353,9 @@ document.getElementById("manualForm").addEventListener("submit", async e => {
     status.textContent = "Added.";
     document.getElementById("manualForm").reset();
     await loadItems();
-  } catch (err) {
-    status.textContent = `Failed: ${err.message}`;
-  }
+     } catch (err) {
+      status.innerHTML = `<span class="error-line">${simplifyError(err)}</span>`;
+    }
 });
 
 // ---------------- file upload ----------------
@@ -374,25 +391,24 @@ document.getElementById("uploadBtn").addEventListener("click", async () => {
     progress.innerHTML = `<div>Select a file first.</div>`;
     return;
   }
-  const steps = ["Preparing image...", "Uploading to S3...", "Running Textract OCR...", "Analyzing allergens (Bedrock + rules engine)...", "Translating (4 languages)...", "Saving to DynamoDB..."];
-  progress.innerHTML = steps.map(s => `<div>${s}</div>`).join("");
+
+  progress.innerHTML = `<span class="spinner"></span> Processing...`;
 
   const formData = new FormData();
+  formData.append("file", fileInput.files[0]);
   try {
-    const uploadFile = await prepareUploadFile(fileInput.files[0]);
-    formData.append("file", uploadFile);
     const result = await api(`/api/menus/${MENU_ID}/upload`, { method: "POST", body: formData });
-    progress.innerHTML += `<div>Done - ${result.items.length} dish(es) extracted.</div>`;
+    progress.innerHTML = `Done - ${result.items.length} dish(es) extracted.`;
     await loadItems();
   } catch (err) {
-    progress.innerHTML += `<div>Failed: ${err.message}</div>`;
+    progress.innerHTML = `<span class="error-line">${simplifyError(err)}</span>`;
   }
 });
 
 // ---------------- init ----------------
 (async function init() {
   // Logged-out is the starting state: single-column so there is no empty left gutter.
-  document.querySelector("main.layout").classList.add("single-column");
+  setAdminUIVisible(false);
   const remembered = sessionStorage.getItem("selectedMenuId");
   if (remembered) {
     selectCafe(remembered);
@@ -403,9 +419,34 @@ document.getElementById("uploadBtn").addEventListener("click", async () => {
   const rememberedToken = sessionStorage.getItem("adminToken");
   if (rememberedToken) {
     adminToken = rememberedToken;
-    document.getElementById("managementPanel").classList.remove("hidden");
-    document.querySelector("main.layout").classList.remove("single-column");
+    setAdminUIVisible(true);
     document.getElementById("adminAuthBtn").textContent = "Logout";
     renderGrid();
   }
 })();
+
+
+// for the error handelling with simple message
+function simplifyError(err) {
+  const msg = err.message || String(err);
+
+  const jsonMatch = msg.match(/\{.*\}/s);
+  if (jsonMatch) {
+    try {
+      const parsed = JSON.parse(jsonMatch[0]);
+      if (parsed.error) return parsed.error;
+    } catch (_) { /* not JSON, fall through */ }
+  }
+
+  if (msg.includes("<!doctype html>") || msg.includes("Werkzeug Debugger")) {
+    if (msg.includes("NoCredentialsError") || msg.includes("ExpiredToken") || msg.includes("InvalidClientTokenId")) {
+      return "Server can't reach AWS right now — please try again in a moment.";
+    }
+    return "Something went wrong on the server. Please try again.";
+  }
+
+  if (msg.startsWith("401")) return "You need to log in as admin first.";
+  if (msg.startsWith("404")) return "Not found.";
+  if (msg.startsWith("500")) return "Something went wrong on the server. Please try again.";
+  return "Something went wrong. Please try again.";
+}

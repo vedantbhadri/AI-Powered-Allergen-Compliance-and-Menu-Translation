@@ -51,6 +51,7 @@ def _load_module(name, path):
 read_menu_handler = _load_module("read_menu_handler", "../build/read_menu/handler.py")
 edit_menu_handler = _load_module("edit_menu_handler", "../build/edit_menu/handler.py")
 
+os.environ.setdefault("BEDROCK_MODEL_ID", "us.anthropic.claude-haiku-4-5-20251001-v1:0")
 from flask import Flask, jsonify, request, send_from_directory
 
 from services import allergen_rules, allergen_service, bedrock_service, dynamo_service, s3_service, textract_service, menu_parser
@@ -306,8 +307,8 @@ def get_menus():
 
 @application.route("/api/menus/<menu_id>", methods=["DELETE"])
 def delete_menu(menu_id):
-    dynamo_service.delete_menu(menu_id)
-    return jsonify({"deleted_menu": menu_id})
+    deleted_count = dynamo_service.delete_menu(menu_id)
+    return jsonify({"deleted_menu": menu_id, "deleted_count": deleted_count})
 
 
 @application.route("/api/menus/<menu_id>/items", methods=["GET"])

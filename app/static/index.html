@@ -32,7 +32,7 @@
       </svg>
       <div>
         <div class="brand-title">The Kiwi Cafe</div>
-        <div class="brand-sub">Queenstown Waterfront &middot; AI Allergen &amp; Translation Demo</div>
+        <div class="brand-sub">AI Allergen &amp; Translation Demo</div>
       </div>
     </div>
     <div class="lang-picker">
@@ -69,7 +69,6 @@
       </div> -->
 
       <div class="card">
-        <div class="card-eyebrow">Step 2</div>
         <h3>Upload a menu file</h3>
         <p class="muted">PDF / JPG / PNG / WebP — text is extracted with Textract OCR, then each dish runs through the same pipeline.</p>
         <input type="file" id="fileInput" accept=".pdf,.jpg,.jpeg,.png,.webp" />
@@ -78,7 +77,6 @@
       </div>
 
       <div class="card">
-        <div class="card-eyebrow">Step 3</div>
         <h3>Add a dish manually</h3>
         <form id="manualForm">
           <input type="text" id="dishName" placeholder="Dish name" required />
@@ -88,11 +86,7 @@
         <div id="manualStatus" class="status-line"></div>
       </div>
 
-      <div class="card reference-card">
-        <h3>Compliance reference</h3>
-        <p class="muted">FSANZ Standard 1.2.3 mandatory declarable allergens</p>
-        <div id="categoryList" class="chip-row"></div>
-      </div>
+     
     </section>
 
     <!-- RIGHT PANEL: Live preview -->
@@ -100,7 +94,7 @@
       <div class="preview-header">
         <div>
           <h2>Menu Highlights</h2>
-          <p class="muted preview-sub">Click any dish to review or override its AI-detected allergens.</p>
+          <p class="muted preview-sub admin-only hidden">Click any dish to review or override its AI-detected allergens.</p>
         </div>
         <div class="filters" id="filters">
           <label><input type="checkbox" value="Gluten-Free" /> Gluten-Free</label>
@@ -109,19 +103,14 @@
         </div>
         <div class="preview-actions">
           <button id="refreshBtn" class="btn small">Refresh</button>
-          <button id="clearBtn" class="btn small danger">Clear dishes</button>
+          <button id="clearBtn" class="btn small danger admin-only hidden">Clear dishes</button>
         </div>
       </div>
       <div id="clearStatus" class="status-line" aria-live="polite"></div>
 
       <div id="dishGrid" class="dish-grid"></div>
 
-      <div class="card allergen-status">
-        <div class="allergen-status-icon" aria-hidden="true">✓</div>
-        <div>
-          <strong>Allergen Status — AI + Rules-Engine Verified</strong>
-          <p class="muted">Every "Contains …" tag is the union of a Bedrock LLM read of the description and a deterministic FSANZ keyword scan — not a knowledge-base lookup. Disagreements between the two are flagged for a human reviewer.</p>
-        </div>
+  
       </div>
     </section>
   </main>

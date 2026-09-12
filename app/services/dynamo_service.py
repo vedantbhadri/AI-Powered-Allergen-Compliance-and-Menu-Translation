@@ -57,6 +57,17 @@ def _save_local(items: List[Dict]) -> None:
 
 
 # ---------------------------------------------------------------- public API
+# Non-dish row item_id prefixes that must survive a "clear dishes" (delete_menu)
+# operation: the restaurant registry row and the upload-status sentinel. Only
+# dish rows (everything else, i.e. dish-*) are deleted.
+_NON_DISH_ITEM_ID_PREFIXES = ("restaurant#", "upload#")
+
+
+def _is_dish_row(item: Dict) -> bool:
+    item_id = item.get("item_id", "")
+    return isinstance(item_id, str) and not item_id.startswith(_NON_DISH_ITEM_ID_PREFIXES)
+
+
 def put_item(item: Dict) -> Dict:
     item.setdefault("item_id", f"dish-{uuid.uuid4().hex[:8]}")
     item["updated_at"] = int(time.time())
@@ -117,13 +128,19 @@ def delete_item(menu_id: str, item_id: str) -> None:
 
 
 def delete_menu(menu_id: str) -> int:
-    """Delete every dish belonging to a menu and return the deleted count."""
+    """Delete only the dish rows belonging to a menu and return the deleted count.
+
+    Non-dish rows are preserved: the restaurant registry row
+    (item_id "restaurant#<id>") and the upload-status sentinel
+    (item_id "upload#<id>"). Only dish rows (item_id "dish-*") are removed.
+    """
     if LOCAL_MODE:
         items = _load_local()
-        remaining = [item for item in items if item["menu_id"] != menu_id]
-        deleted_count = len(items) - len(remaining)
+        deleted = [i for i in items if i["menu_id"] == menu_id and _is_dish_row(i)]
+        deleted_ids = {id(i) for i in deleted}
+        remaining = [i for i in items if id(i) not in deleted_ids]
         _save_local(remaining)
-        return deleted_count
+        return len(deleted)
 
     try:
         table = _get_table()
@@ -140,13 +157,14 @@ def delete_menu(menu_id: str) -> int:
                 break
             query_args["ExclusiveStartKey"] = last_key
 
+        dish_keys = [key for key in keys if _is_dish_row(key)]
         with table.batch_writer() as batch:
-            for key in keys:
+            for key in dish_keys:
                 batch.delete_item(Key={
                     "menu_id": key["menu_id"],
                     "item_id": key["item_id"],
                 })
-        return len(keys)
+        return len(dish_keys)
     except (BotoCoreError, ClientError) as exc:
         logger.error("DynamoDB delete_menu failed: %s", exc)
         raise

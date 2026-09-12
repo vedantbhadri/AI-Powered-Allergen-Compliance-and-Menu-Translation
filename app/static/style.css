@@ -408,3 +408,25 @@ input[type="text"]:focus, textarea:focus {
   .modal-actions { flex-wrap: wrap; }
   .modal-actions .btn { flex: 1 1 100%; width: 100%; }
 }
+.empty-state {
+  text-align: center;
+  padding: 40px 20px;
+}
+.empty-state h4 {
+  margin-bottom: 6px;
+}
+
+.spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid #ccc;
+  border-top-color: #2f6f4f;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  display: inline-block;
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.error-line { color: #c0392b; }

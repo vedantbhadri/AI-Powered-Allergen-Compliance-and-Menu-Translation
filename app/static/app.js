@@ -31,6 +31,9 @@ function setAdminUIVisible(visible) {
   document.getElementById("managementPanel").classList.toggle("hidden", !visible);
   document.querySelectorAll(".admin-only").forEach(el => el.classList.toggle("hidden", !visible));
   document.querySelector("main.layout").classList.toggle("single-column", !visible);
+  if (!visible) {
+    document.getElementById("clearStatus").textContent = "";
+  }
 }
 
 // function added when the user backs to cafe picker
@@ -277,10 +280,12 @@ function openModal(itemId) {
     closeModal();
     await loadItems();
   };
-  document.getElementById("deleteItemBtn").onclick = async () => {
+   document.getElementById("deleteItemBtn").onclick = async () => {
+    const dishName = item.name;
     await api(`/api/menus/${MENU_ID}/items/${itemId}`, { method: "DELETE" });
     closeModal();
     await loadItems();
+    document.getElementById("clearStatus").textContent = `Deleted "${dishName}".`;
   };
 }
 function closeModal() { document.getElementById("editModal").classList.add("hidden"); }

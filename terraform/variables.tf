@@ -85,21 +85,3 @@ variable "aws_profile" {
   type        = string
   default     = "default"
 }
-
-# --- Shared editMenu admin login (Requirement 7) ---------------------------
-# A single shared admin account guards ONLY the PATCH editMenu route. There is
-# no per-restaurant login: restaurants are selected via the menu_id path param,
-# not separate identities. See cognito.tf (aws_cognito_user.admin) and the JWT
-# authorizer on aws_apigatewayv2_route.patch_menu_item in apigateway.tf.
-
-variable "admin_username" {
-  description = "Username for the single shared editMenu admin login (Cognito user in the staff pool)."
-  type        = string
-  default     = "admin"
-}
-
-variable "admin_password" {
-  description = "Password for the single shared editMenu admin login. Supply via a .tfvars file or TF_VAR_admin_password env var; there is intentionally no default so the secret is never committed. Must satisfy the staff_pool password policy (>=10 chars, upper+lower+number)."
-  type        = string
-  sensitive   = true
-}

@@ -60,10 +60,19 @@ def _table():
 
     Cached in a module global so repeated invocations in a warm Lambda reuse the
     same client; tests can replace this function or reset ``_TABLE`` to inject a fake.
+
+    The region is resolved exactly like ``dynamo_service`` (DYNAMODB_REGION →
+    AWS_REGION → ap-southeast-2) because this project splits regions: the menu
+    table lives in us-east-1 while AWS_REGION defaults to ap-southeast-2 for
+    Bedrock. Using ``boto3.resource("dynamodb")`` with no region would follow the
+    general AWS_REGION and hit the wrong region (missing table -> 500/404).
     """
     global _TABLE
     if _TABLE is None:
-        _TABLE = boto3.resource("dynamodb").Table(TABLE_NAME)
+        region = os.environ.get(
+            "DYNAMODB_REGION", os.environ.get("AWS_REGION", "ap-southeast-2")
+        )
+        _TABLE = boto3.resource("dynamodb", region_name=region).Table(TABLE_NAME)
     return _TABLE
 
 

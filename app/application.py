@@ -48,21 +48,36 @@ def _load_module(name, path):
     spec.loader.exec_module(module)
     return module
 
-read_menu_handler = _load_module("read_menu_handler", "../build/read_menu/handler.py")
-edit_menu_handler = _load_module("edit_menu_handler", "../build/edit_menu/handler.py")
-
-os.environ.setdefault("BEDROCK_MODEL_ID", "us.anthropic.claude-haiku-4-5-20251001-v1:0")
-from flask import Flask, jsonify, request, send_from_directory
-
-from services import allergen_rules, allergen_service, bedrock_service, dynamo_service, s3_service, textract_service, menu_parser
-
 # --- REAL AWS connection ----------------------------------------------------
 # This app now talks to the actual deployed DynamoDB table and S3 bucket in
-# the team's real AWS account (us-east-1). No moto, no fakes. Requires real
-# AWS credentials to be set in this terminal session (aws sts get-caller-identity
-# should succeed) before starting the server.
-os.environ.setdefault("AWS_REGION", "us-east-1")
-os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")
+# the team's real AWS account. No moto, no fakes. Requires real AWS credentials
+# to be set in this terminal session (aws sts get-caller-identity should
+# succeed) before starting the server.
+#
+# IMPORTANT: this block must run BEFORE any `from services import ...` (and
+# before _load_module of the Lambda handlers, which import services themselves).
+# The services modules bind their table/region/bucket names at import time, so
+# setting these env vars later would silently point them at the wrong resources.
+#
+# This project spans TWO regions: Bedrock/KB in ap-southeast-2, and
+# DynamoDB/S3/Textract in us-east-1. A single AWS_REGION cannot serve both, so
+# each service reads its own per-service override. Setting them all here (via
+# setdefault) means a plain `python application.py` works even when the shell
+# has AWS_REGION set to ap-southeast-2 for the CLI; explicit per-service env
+# vars set in the shell still win.
+os.environ.setdefault("AWS_REGION", "ap-southeast-2")      # general default
+os.environ.setdefault("AWS_DEFAULT_REGION", "ap-southeast-2")
+os.environ.setdefault("BEDROCK_REGION", "ap-southeast-2")  # Bedrock + KB
+os.environ.setdefault("KB_REGION", "ap-southeast-2")
+os.environ.setdefault("DYNAMODB_REGION", "us-east-1")      # storage stack
+os.environ.setdefault("S3_REGION", "us-east-1")
+os.environ.setdefault("TEXTRACT_REGION", "us-east-1")
+
+# Default Bedrock model. MUST be the inference-profile id WITHOUT the ":0"
+# suffix: "us.anthropic.claude-haiku-4-5-20251001-v1:0" and bare foundation-model
+# ids are rejected by Converse with ValidationException (verified against the
+# live account). Explicit shell env (e.g. start_cloud_mode.ps1) still wins.
+os.environ.setdefault("BEDROCK_MODEL_ID", "au.anthropic.claude-opus-4-6-v1")
 
 # dynamo_service.py and editMenu's handler.py each read a differently-named
 # env var for the table - both are set here so they agree on the same real table.
@@ -71,6 +86,13 @@ os.environ["MENU_TABLE_NAME"] = "allergen-demo-dev-menu-items"
 
 # s3_service.py reads this exact name (confirmed via findstr earlier).
 os.environ["S3_BUCKET"] = "allergen-demo-dev-menu-uploads-669232219904"
+
+read_menu_handler = _load_module("read_menu_handler", "../build/read_menu/handler.py")
+edit_menu_handler = _load_module("edit_menu_handler", "../build/edit_menu/handler.py")
+
+from flask import Flask, jsonify, request, send_from_directory
+
+from services import allergen_rules, allergen_service, bedrock_service, dynamo_service, s3_service, textract_service, menu_parser
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -338,10 +360,15 @@ def update_item(menu_id, item_id):
     body = request.get_json(force=True) or {}
     if "confirmed_allergens" in body:
         confirmed = [c for c in body["confirmed_allergens"] if c in allergen_rules.PEAL_CATEGORIES]
+        # Guard for legacy rows that predate the allergens map: create it on demand.
+        if not isinstance(existing.get("allergens"), dict):
+            existing["allergens"] = {}
         existing["allergens"]["confirmed"] = confirmed
         existing["allergens"]["display_tags"] = allergen_rules.to_display_tags(confirmed)
         existing["diet_tags"] = allergen_rules.derive_diet_tags(confirmed)
     if "translations" in body:
+        if not isinstance(existing.get("translations"), dict):
+            existing["translations"] = {}
         existing["translations"].update(body["translations"])
     if "name" in body:
         existing["name"] = body["name"]

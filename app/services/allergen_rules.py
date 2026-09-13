@@ -18,9 +18,12 @@ real commercial setting - it is not exhaustive of every product name,
 regional ingredient, or brand-specific formulation.
 """
 from __future__ import annotations
+import re
 from typing import Dict, List, Set
 
 # Canonical mandatory declarable allergen categories under FSANZ Standard 1.2.3
+# (incl. Molluscs, required for declaration — see docs/nz_peal_allergens.md
+# "## Molluscs"; the deterministic extractor already emits it).
 PEAL_CATEGORIES: List[str] = [
     "Gluten (Cereals)",
     "Crustacea",
@@ -32,6 +35,7 @@ PEAL_CATEGORIES: List[str] = [
     "Tree Nuts",
     "Sesame",
     "Lupin",
+    "Molluscs",
     "Added Sulphites",
 ]
 
@@ -47,6 +51,7 @@ DISPLAY_TAG: Dict[str, str] = {
     "Tree Nuts": "Contains Tree Nuts",
     "Sesame": "Contains Sesame",
     "Lupin": "Contains Lupin",
+    "Molluscs": "Contains Molluscs",
     "Added Sulphites": "Contains Sulphites",
 }
 
@@ -79,16 +84,27 @@ INGREDIENT_KEYWORDS: Dict[str, str] = {
     "fish": "Fish", "salmon": "Fish", "tuna": "Fish", "anchov": "Fish",
     "cod": "Fish", "snapper": "Fish", "worcestershire": "Fish",
     "fish sauce": "Fish", "chowder": "Fish",
+    # Molluscs
+    "clam": "Molluscs", "mussel": "Molluscs", "mussels": "Molluscs",
+    "oyster": "Molluscs", "oysters": "Molluscs",
+    "scallop": "Molluscs", "scallops": "Molluscs",
+    "squid": "Molluscs", "calamari": "Molluscs", "octopus": "Molluscs",
+    "snail": "Molluscs", "snails": "Molluscs", "mollusc": "Molluscs",
     # Milk
     "milk": "Milk", "cream": "Milk", "butter": "Milk", "cheese": "Milk",
     "yoghurt": "Milk", "yogurt": "Milk", "parmesan": "Milk",
     "mozzarella": "Milk", "custard": "Milk", "ghee": "Milk",
     "gelato": "Milk", "mascarpone": "Milk",
+    # common compounds whose stem is not a standalone word (word-boundary safe)
+    "cheesecake": "Milk", "buttermilk": "Milk", "ice cream": "Milk",
+    "cream cheese": "Milk", "fishcake": "Fish", "fish cakes": "Fish",
+    "peanut butter": "Peanuts", "soybeans": "Soybeans",
     # Peanuts
     "peanut": "Peanuts", "groundnut": "Peanuts", "satay": "Peanuts",
     # Soy
     "soy": "Soybeans", "soya": "Soybeans", "tofu": "Soybeans",
-    "edamame": "Soybeans", "miso": "Soybeans", "tempeh": "Soybeans",
+    "soybeans": "Soybeans", "edamame": "Soybeans", "miso": "Soybeans",
+    "tempeh": "Soybeans",
     # Tree nuts
     "almond": "Tree Nuts", "cashew": "Tree Nuts", "walnut": "Tree Nuts",
     "hazelnut": "Tree Nuts", "pistachio": "Tree Nuts", "pecan": "Tree Nuts",
@@ -111,15 +127,23 @@ def scan_text_for_allergens(text: str) -> List[str]:
     rules-engine cross-check that runs *in addition to* the Bedrock LLM
     extraction - the union/agreement of both is what actually gets
     surfaced to the diner as a hard 'Contains X' tag.
+
+    Matching is whole-word (word-boundary) and case-insensitive: substrings
+    inside unrelated words do not trigger false positives (e.g. "egg" does
+    not match "eggplant", "oat" does not match "goat", "butter" does not
+    match "butterfly"). Common plural/derived forms ("prawns", "almonds",
+    "mussels", "scallops") are matched by allowing trailing s/es after the
+    keyword.
     """
     if not text:
         return []
     lowered = f" {text.lower()} "
     found: Set[str] = set()
     for keyword, category in INGREDIENT_KEYWORDS.items():
-        if f" {keyword}" in lowered or lowered.startswith(keyword):
-            if keyword in lowered:
-                found.add(category)
+        # \b word boundaries for the keyword, then an optional common suffix
+        # (s/es) so plurals are caught: "prawn" -> "prawns", "mussel" -> "mussels".
+        if re.search(rf"\b{re.escape(keyword)}(?:s|es)?\b", lowered):
+            found.add(category)
     return sorted(found)
 
 

@@ -2,6 +2,9 @@ app/.venv/
 app/__pycache__/
 app/**/__pycache__/
 *.pyc
+.DS_Store
+*.mergebak
+*.orig
 
 terraform/.terraform/
 terraform/.terraform.lock.hcl
